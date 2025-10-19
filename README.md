@@ -19,3 +19,10 @@ Copy code
 - Web: `cd app && npm i && npm run dev`
 
 数据规范与输出格式见 `/README.data.md`（后续补充）。
+
+
+## Precision/Recall语义
+precision：严格离开确认（confirm_leave=True）、reuse_tail_bi=False，减少“假离开”。
+
+recall：偏召回更多结构（confirm_leave=False 或 reuse_tail_bi=True），便于回放探索。
+文档中 market_index.json 给了 reuse_tail_bi:false，建议固定下两套参数表并在 CLI 打印。

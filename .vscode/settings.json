@@ -1,0 +1,13 @@
+{
+    "terminal.integrated.profiles.osx": {
+      "Venv Zsh (Trading_App)": {
+        "path": "zsh",
+        "args": [
+          "-l",
+          "-c",
+          "source ${workspaceFolder}/backend/.venv/bin/activate; exec zsh -l"
+        ]
+      }
+    },
+    "terminal.integrated.defaultProfile.osx": "Venv Zsh (Trading_App)"
+  }

@@ -23,7 +23,7 @@ dist/             # 打包输出目录
 # Node
 node_modules/     # 前端依赖包（非常大，每个人可本地重装）
 dist/             # 前端打包产物
-.vite/            # Vite 的临时缓存目录
+.vite/            # Vite 的临时缓存目录；Vite的作用是快速构建 & 本地开发服务器
 .DS_Store         # macOS 自动生成的隐藏文件（没必要上传）
 
 # Outputs

@@ -1,0 +1,77 @@
+[project]
+name = "chanlab-backend"
+version = "1.2.0"
+description = "Deterministic Chan Theory Engine for A-share Market"
+requires-python = ">=3.10"
+authors = [
+    { name = "Elodie Liu", email = "elodie@example.com" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+pretty = true
+show_column_numbers = true
+show_error_codes = true
+namespace_packages = true
+mypy_path = ["backend"]
+exclude = "(^venv/|^\\.venv/|^out/|^backend/tests/)"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "C90", "I"]
+ignore = ["C901", "E501", "B008", "E741"]
+
+# ⬇️ 原来写在 [tool.ruff] 下的 per-file-ignores 要迁到这里
+per-file-ignores = { "backend/tests/*" = ["C901", "B018", "E501"] }
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["core"]
+known-third-party = ["pandas", "numpy", "pytest"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+
+[tool.coverage.run]
+source = ["backend/core"]
+omit = ["backend/tests/*", "backend/scripts/*"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 85
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
