@@ -1,0 +1,52 @@
+# 这个文件告诉 GitHub：
+# “当有人推送代码到 main/master 分支时，请自动在云端运行：
+# 1️⃣ Python 核心的代码检查与测试
+# 2️⃣ Node 前端的类型检查与打包。”
+
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pre-commit install
+      - name: Lint & Test
+        run: |
+          pre-commit run --all-files
+          pytest -q
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck & Build
+        run: |
+          npm run typecheck
+          npm run build

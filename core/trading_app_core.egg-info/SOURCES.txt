@@ -1,0 +1,7 @@
+pyproject.toml
+core/__init__.py
+trading_app_core.egg-info/PKG-INFO
+trading_app_core.egg-info/SOURCES.txt
+trading_app_core.egg-info/dependency_links.txt
+trading_app_core.egg-info/requires.txt
+trading_app_core.egg-info/top_level.txt

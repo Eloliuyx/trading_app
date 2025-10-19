@@ -1,0 +1,35 @@
+# .gitignore 文件的作用是告诉 Git：在版本控制中哪些文件或目录不需要被追踪（不加入 commit）。
+
+# 比如：
+
+# 依赖包太大（node_modules/、.venv/）
+
+# 临时编译产物（dist/、__pycache__/）
+
+# 个人环境配置（.vscode/、.env）
+
+# 自动生成的中间文件（日志、缓存、输出）
+
+# 这些内容没有必要放进 Git 仓库。
+
+# Python
+__pycache__/      # Python 自动生成的缓存目录
+*.pyc             # 编译后的 Python 字节码文件
+.venv/            # 本地 Python 虚拟环境
+.env              # 环境变量文件（通常包含敏感信息）
+dist/             # 打包输出目录
+.build/           # 临时构建文件夹
+
+# Node
+node_modules/     # 前端依赖包（非常大，每个人可本地重装）
+dist/             # 前端打包产物
+.vite/            # Vite 的临时缓存目录
+.DS_Store         # macOS 自动生成的隐藏文件（没必要上传）
+
+# Outputs
+/out/*            # 忽略 out 目录下所有文件
+!/out/.gitkeep    # 但保留 .gitkeep 这个空文件，让空目录能进仓库
+
+# IDE
+.vscode/          # VS Code 的个人设置
+.idea/            # JetBrains 系 IDE 设置（如 PyCharm, WebStorm）
