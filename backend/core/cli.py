@@ -6,8 +6,10 @@ import argparse
 import glob
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -99,6 +101,35 @@ def _mode_to_params(mode: str) -> tuple[bool, bool]:
         return (False, True)
     # default: precision
     return (True, False)
+
+
+def _symbols_from_files(files: Iterable[str]) -> list[str]:
+    out = []
+    for path in files:
+        sym = os.path.splitext(os.path.basename(path))[0]
+        out.append(sym)
+    return out
+
+
+def _snapshot_data_dir(data_dir: str) -> dict[str, tuple[float, int]]:
+    """返回 data_dir 下每个 csv 的 (mtime,size) 快照，用于 watch 模式判断变化。"""
+    snap: dict[str, tuple[float, int]] = {}
+    for p in glob.glob(os.path.join(data_dir, "*.csv")):
+        try:
+            st = os.stat(p)
+            snap[p] = (st.st_mtime, st.st_size)
+        except FileNotFoundError:
+            continue
+    return snap
+
+
+def _changed(prev: dict[str, tuple[float, int]], curr: dict[str, tuple[float, int]]) -> bool:
+    if prev.keys() != curr.keys():
+        return True
+    for k, v in curr.items():
+        if k not in prev or prev[k] != v:
+            return True
+    return False
 
 
 # --------------- pipeline ---------------
@@ -203,9 +234,12 @@ def analyze_all(
     mode: str = "precision",
     confirm_leave: bool | None = None,
     reuse_tail_bi: bool | None = None,
+    workers: int = 0,
 ) -> str:
     os.makedirs(out_dir, exist_ok=True)
     files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
+    symbols = _symbols_from_files(files)
+
     buckets: dict[str, list[tuple[str, float]]] = {
         "买": [],
         "观察买点": [],
@@ -221,20 +255,40 @@ def analyze_all(
     confirm_leave = default_confirm if confirm_leave is None else confirm_leave
     reuse_tail_bi = default_reuse if reuse_tail_bi is None else reuse_tail_bi
 
-    for path in files:
-        symbol = os.path.splitext(os.path.basename(path))[0]
+    def _run_one(sym: str) -> tuple[str, dict[str, Any] | None, str | None]:
+        path_csv = os.path.join(data_dir, f"{sym}.csv")
         try:
-            df_eq = _load_eq_df(path, cutoff)
+            df_eq = _load_eq_df(path_csv, cutoff)
             out = _analyze_df(
-                symbol, df_eq, confirm_leave=confirm_leave, reuse_tail_bi=reuse_tail_bi
+                sym, df_eq, confirm_leave=confirm_leave, reuse_tail_bi=reuse_tail_bi
             )
+            return (sym, out, None)
         except Exception as e:
-            # 失败 fallback：写空结构，避免整批中断
-            out = _empty_analysis(symbol)
+            out = _empty_analysis(sym)
             out["meta"]["error"] = str(e)
+            return (sym, out, str(e))
 
-        # 写单标的 json
-        out_path = os.path.join(out_dir, f"{symbol}.json")
+    results: list[tuple[str, dict[str, Any]]] = []
+
+    if workers and workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            fut_map = {ex.submit(_run_one, sym): sym for sym in symbols}
+            for fut in as_completed(fut_map):
+                sym = fut_map[fut]
+                sym_, out, err = fut.result()
+                if err:
+                    print(f"[WARN] {sym}: {err}")
+                results.append((sym_, out))  # type: ignore
+    else:
+        for sym in symbols:
+            sym_, out, err = _run_one(sym)
+            if err:
+                print(f"[WARN] {sym}: {err}")
+            results.append((sym_, out))  # type: ignore
+
+    # 写单标的 json & 汇总
+    for sym, out in results:
+        out_path = os.path.join(out_dir, f"{sym}.json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
         last_out_path = out_path
@@ -242,11 +296,11 @@ def analyze_all(
         rec = out["recommendation_for_today"]
         action = rec["action"]
         bs = float(rec["buy_strength"])
-        buy_strength_map[symbol] = bs
+        buy_strength_map[sym] = bs
         if action in buckets:
-            buckets[action].append((symbol, bs))
+            buckets[action].append((sym, bs))
         else:
-            buckets.setdefault(action, []).append((symbol, bs))
+            buckets.setdefault(action, []).append((sym, bs))
 
     # 各 bucket 内按 buy_strength 降序
     sort_desc = {
@@ -284,9 +338,9 @@ def main():
     p = argparse.ArgumentParser(description="Trading_App v1.2 CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    # analyze
-    pa = sub.add_parser("analyze", help="分析单个标的")
-    pa.add_argument("symbol", type=str)
+    # analyze（✅ 支持多标的）
+    pa = sub.add_parser("analyze", help="分析单个或多个标的")
+    pa.add_argument("symbols", nargs="+", type=str, help="示例：600519.SH 000001.SZ")
     pa.add_argument("--data", type=str, default="./data")
     pa.add_argument("--out", type=str, default="./out")
     pa.add_argument("--t", type=str, default=None, help="截止日期 YYYY-MM-DD（回放）")
@@ -307,7 +361,7 @@ def main():
     pa.add_argument("--no-reuse-tail-bi", dest="reuse_tail_bi", action="store_false")
     pa.set_defaults(confirm_leave=None, reuse_tail_bi=None)
 
-    # analyze-all
+    # analyze-all（✅ 并发 & watch）
     paa = sub.add_parser("analyze-all", help="批量分析 data 目录全部 CSV")
     paa.add_argument("--data", type=str, default="./data")
     paa.add_argument("--out", type=str, default="./out")
@@ -317,22 +371,27 @@ def main():
     paa.add_argument("--no-confirm-leave", dest="confirm_leave", action="store_false")
     paa.add_argument("--reuse-tail-bi", dest="reuse_tail_bi", action="store_true")
     paa.add_argument("--no-reuse-tail-bi", dest="reuse_tail_bi", action="store_false")
-    paa.set_defaults(confirm_leave=None, reuse_tail_bi=None)
+    paa.add_argument("--workers", type=int, default=0, help="并发线程数，0 表示串行")
+    paa.add_argument("--watch", action="store_true", help="监听 data 目录变化并自动重跑")
+    paa.set_defaults(confirm_leave=None, reuse_tail_bi=None, watch=False)
 
     args = p.parse_args()
 
     if args.cmd == "analyze":
-        path = analyze(
-            args.symbol,
-            args.data,
-            args.out,
-            args.t,
-            mode=args.mode,
-            confirm_leave=args.confirm_leave,
-            reuse_tail_bi=args.reuse_tail_bi,
-        )
-        print(path)
+        for s in args.symbols:
+            path = analyze(
+                s,
+                args.data,
+                args.out,
+                args.t,
+                mode=args.mode,
+                confirm_leave=args.confirm_leave,
+                reuse_tail_bi=args.reuse_tail_bi,
+            )
+            print(path)
+
     elif args.cmd == "analyze-all":
+        # 首次跑
         path = analyze_all(
             args.data,
             args.out,
@@ -340,8 +399,31 @@ def main():
             mode=args.mode,
             confirm_leave=args.confirm_leave,
             reuse_tail_bi=args.reuse_tail_bi,
+            workers=args.workers,
         )
         print(path)
+
+        if args.watch:
+            print(f"[watch] watching {args.data} ... Ctrl+C 退出")
+            prev = _snapshot_data_dir(args.data)
+            while True:
+                time.sleep(3.0)
+                curr = _snapshot_data_dir(args.data)
+                if _changed(prev, curr):
+                    prev = curr
+                    try:
+                        path = analyze_all(
+                            args.data,
+                            args.out,
+                            args.t,
+                            mode=args.mode,
+                            confirm_leave=args.confirm_leave,
+                            reuse_tail_bi=args.reuse_tail_bi,
+                            workers=args.workers,
+                        )
+                        print(f"[watch] re-run done: {path}")
+                    except Exception as e:
+                        print(f"[watch][ERROR] {e}")
 
 
 if __name__ == "__main__":

@@ -33,3 +33,11 @@ dist/             # 前端打包产物
 # IDE
 .vscode/          # VS Code 的个人设置
 .idea/            # JetBrains 系 IDE 设置（如 PyCharm, WebStorm）
+
+# 忽略输出文件和缓存
+out/
+data/
+__pycache__/
+*.csv
+*.json
+*.log
