@@ -259,9 +259,7 @@ def analyze_all(
         path_csv = os.path.join(data_dir, f"{sym}.csv")
         try:
             df_eq = _load_eq_df(path_csv, cutoff)
-            out = _analyze_df(
-                sym, df_eq, confirm_leave=confirm_leave, reuse_tail_bi=reuse_tail_bi
-            )
+            out = _analyze_df(sym, df_eq, confirm_leave=confirm_leave, reuse_tail_bi=reuse_tail_bi)
             return (sym, out, None)
         except Exception as e:
             out = _empty_analysis(sym)

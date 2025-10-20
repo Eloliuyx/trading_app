@@ -1,0 +1,26 @@
+{
+    "meta": {
+      "symbol": "600519.SH",
+      "asof": "2025-10-19T12:30:00+08:00",
+      "last_bar_date": "2025-10-17",
+      "tz": "Asia/Shanghai"
+    },
+    "rules_version": "v1.2.0",
+    "fractals": [{ "idx": 2, "type": "top" }, { "idx": 4, "type": "bottom" }],
+    "bis": [{ "start": 1, "end": 3, "dir": "up" }],
+    "segments": [{ "start": 1, "end": 5, "dir": "up" }],
+    "zhongshus": [
+      { "start": 1, "end": 4, "price_range": [1630,1660] }
+    ],
+    "shi": {
+      "class": "中枢上破进行中",
+      "confidence": 0.82
+    },
+    "recommendation_for_today": {
+      "at_close_of": "2025-10-17",
+      "action": "买",
+      "buy_strength": 0.91,
+      "rationale": "突破上沿后回踩确认，当前离开段动能强于前段，内部未见背驰。",
+      "invalidate_if": "跌破中枢上沿 -1%"
+    }
+  }
