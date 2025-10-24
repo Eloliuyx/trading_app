@@ -22,7 +22,7 @@ export default function SymbolPicker() {
         {PRESETS.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
 
-      <input value={input} onChange={e=>setInput(e.target.value)} placeholder="输入代码（含后缀）如 600036.SH" />
+      <input value={input} onChange={e=>setInput(e.target.value)} placeholder="e.g. 600036.SH" />
       <button onClick={onLoad}>载入</button>
 
       {/* 市场页入口（占位） */}

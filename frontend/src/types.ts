@@ -49,3 +49,16 @@ export type MarketIndex = {
   buckets: Record<'买'|'观察买点'|'持有'|'止盈'|'回避', string[]>;
   buy_strength: Record<string, number>;
 };
+
+export type Zone = { upper: number; lower: number; tStart: number; tEnd: number };
+
+export type LinePoint = { time: number; value: number };
+export type MALine = { name: string; values: LinePoint[] };
+export type SeriesCBundle = {
+  symbol: string;
+  timeframe: string;
+  candles: Candle[];
+  ma: MALine[];
+  segments: Segment[];
+  zones: Zone[];
+};
