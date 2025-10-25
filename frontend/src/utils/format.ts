@@ -1,9 +1,17 @@
-export const toUTCTS = (dateStr: string): number => {
-    // 输入 YYYY-MM-DD（Asia/Shanghai），转 UTC 秒级时间戳
-    const [y,m,d] = dateStr.split('-').map(Number);
-    // 构造本地 +08:00 的日期，再转 UTC
-    const dt = new Date(Date.UTC(y, m - 1, d, 0, 0, 0)); // 00:00 UTC
-    return Math.floor(dt.getTime() / 1000);
-  };
+// frontend/src/utils/format.ts
+import type { Time } from 'lightweight-charts';
 
-  export const pct = (v: number) => `${Math.round(v * 100)}%`;
+export const toUTCTime = (dateStr: string): Time => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const secs = Math.floor(Date.UTC(y, m - 1, d, 0, 0, 0) / 1000);
+  // 轻量图的 UTCTimestamp 是带品牌的 number，需要断言为 Time
+  return secs as unknown as Time;
+};
+
+export const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+export function toUTCTS(dateStr: string): number {
+  const clean = dateStr.replace(/T/, " ").replace(/Z$/, "");
+  const d = new Date(clean);
+  return Math.floor(d.getTime() / 1000);
+}

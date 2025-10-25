@@ -1,28 +1,33 @@
 import React, { useEffect } from 'react';
-import type {
-  IChartApi,
-  ISeriesApi,
-  Time,
-  SeriesMarker,
-  CandlestickData,
-} from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 
-export type Fractal = { idx: number; type: 'top' | 'bottom' };
+/** 统一的 K 线条形类型（兼容你自定义的 Candle[] 和 LWC 的 CandlestickData<Time>[]） */
+type Bar = {
+  time: Time | number; // 允许 number 秒级时间戳
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
 export type Segment = { start: number; end: number; dir: 'up' | 'down' };
 export type Zhongshu = { start: number; end: number; price_range: [number, number] };
 
-/** 颜色常量（文件内定义，避免未导出报错） */
-const TOP_COLOR = '#e53935';    // 顶分型/下跌色
-const BOTTOM_COLOR = '#1e88e5'; // 底分型/上升色
+/** 颜色常量 */
+const COLOR_UP = '#e53935';
+const COLOR_DOWN = '#1e88e5';
+const ZS_FILL = 'rgba(128,128,128,0.18)';
+const ZS_STROKE = 'rgba(90,90,90,0.5)';
 
 type Props = {
   chart: IChartApi;
   candle: ISeriesApi<'Candlestick'>;
-  containerEl: HTMLDivElement;              // 从 KLineChart onReady 传入
-  data: CandlestickData[];                  // 为了取端点价格
-  fractals?: Fractal[];
+  containerEl: HTMLDivElement;
+  data: Bar[];                   // ✅ 放宽为 Bar[]
   segments?: Segment[];
   zhongshus?: Zhongshu[];
+  /** 可选：过滤太短的段/中枢，避免噪点（按原始K索引跨度） */
+  minSpanBars?: number;          // 默认 2
 };
 
 const Overlays: React.FC<Props> = ({
@@ -30,37 +35,17 @@ const Overlays: React.FC<Props> = ({
   candle,
   containerEl,
   data,
-  fractals = [],
   segments = [],
   zhongshus = [],
+  minSpanBars = 2,
 }) => {
-  const times: Time[] = data.map(d => d.time);
+  // 将 data.time 提取为 Time[]，供 timeToCoordinate 使用
+  const times: Time[] = data.map(d => (d.time as Time));
 
-  // 1) 分型 markers（严格用与该 bar 完全一致的 time）
   useEffect(() => {
-    if (!candle || !times.length) return;
-    const markers: SeriesMarker<Time>[] = fractals
-      .filter(f => f.idx >= 0 && f.idx < times.length)
-      .map(f => ({
-        time: times[f.idx],
-        position: f.type === 'top' ? 'aboveBar' : 'belowBar',
-        shape: f.type === 'top' ? 'arrowDown' : 'arrowUp',
-        text: f.type === 'top' ? '顶分型' : '底分型',
-        size: 1,
-        color: f.type === 'top' ? TOP_COLOR : BOTTOM_COLOR,
-      }));
-    candle.setMarkers(markers);
-    return () => {
-      // 组件卸载或依赖变化时清空，避免残留
-      candle.setMarkers([]);
-    };
-  }, [candle, times, fractals]);
+    if (!chart || !candle || !containerEl || times.length === 0) return;
 
-  // 2) 线段/中枢：用自建 Canvas 叠加层（坐标来自官方 API，避免位移）
-  useEffect(() => {
-    if (!chart || !candle || !containerEl || !times.length) return;
-
-    // 叠加层 Canvas（附着在容器内，避免访问内部私有 DOM）
+    // —— 叠加层 Canvas（固定挂在容器内）——
     let overlay = containerEl.querySelector<HTMLCanvasElement>(':scope > canvas.__overlay__');
     if (!overlay) {
       overlay = document.createElement('canvas');
@@ -69,29 +54,21 @@ const Overlays: React.FC<Props> = ({
       overlay.style.left = '0';
       overlay.style.top = '0';
       overlay.style.pointerEvents = 'none';
-      overlay.style.zIndex = '2'; // 确保在主图之上
-      if (!containerEl.style.position) {
-        containerEl.style.position = 'relative';
-      }
+      overlay.style.zIndex = '2';
+      if (!containerEl.style.position) containerEl.style.position = 'relative';
       containerEl.appendChild(overlay);
     }
 
     const dpr = window.devicePixelRatio || 1;
 
-    // 从 idx 获取屏幕坐标
     const ixToX = (i: number) => {
       const t = times[i];
-      const x = chart.timeScale().timeToCoordinate(t as Time);
+      const x = chart.timeScale().timeToCoordinate(t);
       return x ?? -9999;
     };
-    // 从价格获取屏幕坐标（使用 series.priceToCoordinate）
-    const pToY = (p: number) => {
-      const y = candle.priceToCoordinate(p);
-      return y ?? -9999;
-    };
+    const pToY = (p: number) => candle.priceToCoordinate(p) ?? -9999;
     const priceAt = (i: number) => {
-      // 用收盘价；若要画“笔端价位”，可改为 high/low 或后端提供的端点价
-      const bar = data[i] as CandlestickData;
+      const bar = data[i];
       return bar?.close ?? bar?.open ?? 0;
     };
 
@@ -106,46 +83,41 @@ const Overlays: React.FC<Props> = ({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, box.width, box.height);
 
-      // —— 画线段（按端点 idx 连接端点价）——
+      // —— 线段 —— //
       ctx.lineWidth = 2;
       segments.forEach(seg => {
+        if (seg.end - seg.start < Math.max(1, minSpanBars)) return;
         const s = Math.max(0, Math.min(data.length - 1, seg.start));
         const e = Math.max(0, Math.min(data.length - 1, seg.end));
-        const x1 = ixToX(s);
-        const x2 = ixToX(e);
+        const x1 = ixToX(s); const x2 = ixToX(e);
         if (x1 < 0 || x2 < 0) return;
-        const y1 = pToY(priceAt(s));
-        const y2 = pToY(priceAt(e));
+        const y1 = pToY(priceAt(s)); const y2 = pToY(priceAt(e));
         if (y1 < 0 || y2 < 0) return;
-        ctx.strokeStyle = seg.dir === 'up' ? TOP_COLOR : BOTTOM_COLOR;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
+        ctx.strokeStyle = seg.dir === 'up' ? COLOR_UP : COLOR_DOWN;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       });
 
-      // —— 画中枢（半透明矩形）——
+      // —— 中枢 —— //
       zhongshus.forEach(zs => {
+        if (zs.end - zs.start < Math.max(1, minSpanBars)) return;
         const s = Math.max(0, Math.min(data.length - 1, zs.start));
         const e = Math.max(0, Math.min(data.length - 1, zs.end));
-        const x1 = ixToX(s);
-        const x2 = ixToX(e);
+        const x1 = ixToX(s); const x2 = ixToX(e);
         const [L, U] = zs.price_range;
-        const yU = pToY(U);
-        const yL = pToY(L);
+        const yU = pToY(U); const yL = pToY(L);
         if (x1 < 0 || x2 < 0 || yU < 0 || yL < 0) return;
         const x = Math.min(x1, x2);
         const w = Math.max(1, Math.abs(x2 - x1));
         const y = Math.min(yU, yL);
         const h = Math.max(1, Math.abs(yL - yU));
-        ctx.fillStyle = 'rgba(128,128,128,0.18)';
+        ctx.fillStyle = ZS_FILL;
         ctx.fillRect(x, y, w, h);
-        ctx.strokeStyle = 'rgba(90,90,90,0.5)';
+        ctx.strokeStyle = ZS_STROKE;
         ctx.strokeRect(x, y, w, h);
       });
     };
 
-    // 初次 + 视窗变化时重绘
+    // 初次与可视窗口变化时重绘
     redraw();
     const ts = chart.timeScale();
     const onRange = () => redraw();
@@ -157,12 +129,8 @@ const Overlays: React.FC<Props> = ({
     return () => {
       ts.unsubscribeVisibleTimeRangeChange(onRange);
       ro.disconnect();
-      // overlay 保留以便复用
     };
-  }, [chart, candle, containerEl, data, segments, zhongshus, times]);
-  // 说明：
-  // - 依赖中包含 data/segments/zhongshus，使其更新时触发重绘
-  // - 包含 times（由 data 推导）以确保坐标映射同步
+  }, [chart, candle, containerEl, data, segments, zhongshus, times, minSpanBars]);
 
   return null;
 };

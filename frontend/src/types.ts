@@ -1,3 +1,6 @@
+// frontend/src/types.ts
+import type { Time } from 'lightweight-charts';
+
 export type Fractal = { idx: number; type: 'top' | 'bottom' };
 export type Bi = { start: number; end: number; dir: 'up' | 'down' };
 export type Segment = { start: number; end: number; dir: 'up' | 'down' };
@@ -25,9 +28,7 @@ export type Recommendation = {
   components?: Record<string, number>;
 };
 export type OutputJson = {
-  meta: {
-    symbol: string; asof: string; last_bar_date: string; tz: string;
-  };
+  meta: { symbol: string; asof: string; last_bar_date: string; tz: string; };
   rules_version: string;
   fractals: Fractal[];
   bis: Bi[];
@@ -38,7 +39,7 @@ export type OutputJson = {
 };
 
 export type Candle = {
-  time: number; // UTCTimestamp (seconds)
+  time: Time;                 // ✅ 用 LWC 的 Time（品牌类型）
   open: number; high: number; low: number; close: number;
 };
 
@@ -50,6 +51,14 @@ export type MarketIndex = {
   buy_strength: Record<string, number>;
 };
 
+export type SymbolMeta = {
+  symbol: string;
+  name?: string;
+  market?: string;   // SH/SZ/...
+  industry?: string;
+  area?: string;
+};
+
 export type Zone = { upper: number; lower: number; tStart: number; tEnd: number };
 
 export type LinePoint = { time: number; value: number };
@@ -57,7 +66,7 @@ export type MALine = { name: string; values: LinePoint[] };
 export type SeriesCBundle = {
   symbol: string;
   timeframe: string;
-  candles: Candle[];
+  candles: Candle[];          // ✅ 跟随改为 Time
   ma: MALine[];
   segments: Segment[];
   zones: Zone[];

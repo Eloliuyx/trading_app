@@ -8,7 +8,10 @@ import type {
   MarketIndex,
   OutputJson,
 } from "./types";
+import type { SymbolMeta } from "./types";
 import { toUTCTS } from "./utils/format";
+import type { Time, UTCTimestamp, CandlestickData } from 'lightweight-charts';
+
 
 /** —— 小工具 —— */
 async function fetchJSON<T>(url: string): Promise<T> {
@@ -21,7 +24,7 @@ async function fetchText(url: string): Promise<string> {
   if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`);
   return r.text();
 }
-function parseCsvCandles(csv: string): Candle[] {
+function parseCsvCandles(csv: string): CandlestickData<Time>[] {
   const lines = csv.trim().split(/\r?\n/);
   const header = lines.shift()!;
   const cols = header.split(",");
@@ -35,19 +38,21 @@ function parseCsvCandles(csv: string): Candle[] {
   }
   return lines.map((ln) => {
     const parts = ln.split(",");
+    const ts = toUTCTS(parts[idxDate]) as unknown as UTCTimestamp; // ← 关键：声明成 UTCTimestamp
     return {
-      time: toUTCTS(parts[idxDate]),
+      time: ts,
       open: Number(parts[idxOpen]),
       high: Number(parts[idxHigh]),
       low: Number(parts[idxLow]),
       close: Number(parts[idxClose]),
-    };
+    } as CandlestickData<Time>;
   });
 }
 
+
 type State = {
   symbol: string | null;
-  candles: Candle[];
+  candles: CandlestickData<Time>[];
   ma: MALine[];
   segments: Segment[];
   zones: Zone[];
@@ -60,8 +65,14 @@ type State = {
   /** 市场页数据 */
   market: MarketIndex | null;
 
+  /** 可选股票清单（来自 /api/symbols） */
+  symbols: SymbolMeta[];
+
   /** === Actions === */
   setSymbol: (s: string) => void;
+
+  /** 拉取可选股票清单（支持搜索） */
+  loadSymbols: (q?: string) => Promise<void>;
 
   /** 从后端 bundle 拉 K线（不含 outJson） */
   loadFromBackend: (symbol: string, tf?: string) => Promise<void>;
@@ -69,7 +80,7 @@ type State = {
   /** 推荐：一次性拉 bundle + analysis（优先 /api，失败回退到 public） */
   loadAllFor: (symbol: string, tf?: string) => Promise<void>;
 
-  /** 本地示例（无后端也能跑）：读取 /data/600519.SH.csv + /out/600519.SH.json */
+  /** 本地示例（无后端也能跑） */
   loadSeriesCDemo: () => Promise<void>;
 
   /** 市场索引 */
@@ -91,8 +102,21 @@ export const useDataStore = create<State>((set, get) => ({
   outJson: null,
   market: null,
 
+  symbols: [],
+
   setSymbol(s: string) {
     set({ symbol: s });
+  },
+
+  /** 拉取股票列表（可选 q 搜索） */
+  async loadSymbols(q?: string) {
+    try {
+      const url = q ? `/api/symbols?q=${encodeURIComponent(q)}` : `/api/symbols`;
+      const data = await fetchJSON<{count: number; items: SymbolMeta[]}>(url);
+      set({ symbols: data.items || [] });
+    } catch (e: any) {
+      set({ error: e?.message ?? String(e) });
+    }
   },
 
   /** 仅从后端拿 series-c/bundle（不包含 outJson） */

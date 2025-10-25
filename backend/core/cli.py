@@ -46,9 +46,7 @@ def _now_iso_cn() -> str:
 
 
 def _load_eq_df(path: str, cutoff: str | None) -> pd.DataFrame:
-    df = read_csv_checked(path)  # Date,Open,High,Low,Close,Volume,...
-    # 保障升序 & 去重（规范里要求升序，这里兜底）
-    df = df.sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
+    df = read_csv_checked(path)  # Date,Open,High,Low,Close,Volume,...（已严格升序无重复）
     if cutoff:
         # 日期列标准是 YYYY-MM-DD 字符串，直接比较即可（已升序）
         df = df[df["Date"] <= cutoff]

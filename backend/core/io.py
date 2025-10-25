@@ -123,22 +123,10 @@ def _validate_price_consistency(df: pd.DataFrame) -> None:
 
 # === public API ===
 
-
 def read_csv_checked(path: str) -> pd.DataFrame:
-    """
-    读取 CSV → 列名规范化 → 基础校验 → 过滤停牌/无量 → 返回 DataFrame
-    要求：包含列 Date, High, Low；日期升序、去重。
-    """
-    try:
-        df = pd.read_csv(path)
-    except Exception as e:  # noqa: BLE001
-        # 保留异常链，便于定位
-        raise IOValidationError(f"CSV 读取失败: {e}") from e
-
-    df = _rename_columns_if_needed(df)  # 你已有的列名映射函数
-    _validate_price_consistency(df)  # 你已有的校验与类型规范函数
-    df = _filter_suspended_days(df)  # 你已有的过滤函数（若命名不同用你的实际函数）
+    """与 read_ohlcv_csv 等价的权威入口（保持单一来源的严格校验与规范化）。"""
     return read_ohlcv_csv(path)
+
 
 
 def read_ohlcv_csv(path: str) -> pd.DataFrame:
@@ -191,4 +179,4 @@ def summarize_df(df: pd.DataFrame) -> tuple[int, tuple[float, float]]:
     return n, (low, high)
 
 
-__all__ = ["read_ohlcv_csv", "read_csv_checked"]
+__all__ = ["read_ohlcv_csv", "read_csv_checked", "summarize_df"]
