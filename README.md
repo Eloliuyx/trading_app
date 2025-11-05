@@ -1,28 +1,25 @@
-# Trading_App
+# Trading_App — 趋势选股（trend-v0.3）
 
-> 一个**完全确定性**的「缠中说禅」结构识别与可视化系统。
-> 目标：从 CSV 日K 生成客观、可复现的结构（分型/笔/线段/中枢/势），并输出当日建议与买点强度。
+> 使命：让“势”变得可见，让“买点”可度量。
+> 版本口径：`rules_version: trend-v0.3 (practical + weak-to-strong)`
 
-## 结构
-Trading_App/
-├── core/ # Python 分析引擎（无随机、可复现）
-├── app/ # React+Vite 前端可视化（中文 UI）
-├── data/ # CSV（日K，前复权，Asia/Shanghai）
-├── out/ # 分析输出 JSON
-└── .github/ # CI
+本项目是一套 **确定性**、**可复现** 的 A 股日线趋势选股系统。系统在**收盘前 30 分钟**运行，按“趋势—量价—筹码—结构确认—风险过滤（连板）”五维规则自动筛选“**接近主升浪买点**”的股票，并在前端展示**今日日期、推荐列表与推荐理由**。点击个股可查看日K图、所属板块与命中规则。
 
-markdown
-Copy code
+> ⚠️ 本版起已移除缠论（分型/笔/线段/中枢）相关算法与文档；如需回看历史，请检出旧 tag。
 
-## 快速开始
-- Python: `cd core && uv venv && uv pip install -e . && pre-commit install && pytest -q`
-- Web: `cd app && npm i && npm run dev`
+---
 
-数据规范与输出格式见 `/README.data.md`（后续补充）。
+## 规则版本：trend-v0.3（核心要点）
+系统依据 **趋势、量价、筹码、结构确认、风险控制** 五维规则，自动筛选“接近主升浪买点”的股票：
 
+1. **趋势方向**：MA5>MA13>MA39，MA13 向上拐，收盘价站上 MA13；
+2. **量价确认**：当日成交量 ≥ 5 日均量的 1.5 倍，且收盘价 ≥ 近 5 日最高价的 98%（突破前沿）；
+3. **涨幅过滤**：日涨幅介于 3%–6%，动能健康不过热；
+4. **筹码结构（近似）**：近 10 日活跃度提升、波动收敛，价格处于近 30 日上侧区间；
+5. **风险控制（自动）**：连板 ≥ 3 日直接剔除；
+6. **结构确认（弱转强）**：今日实体区间上移（max(Open,Close) 大于昨日），确认多头再次主导。
 
-## Precision/Recall语义
-precision：严格离开确认（confirm_leave=True）、reuse_tail_bi=False，减少“假离开”。
+满足以上条件即进入推荐列表，系统按贴近度打分排序。
+**提示**：盘中“炸板”、极端乖离等仍需人工复核。
 
-recall：偏召回更多结构（confirm_leave=False 或 reuse_tail_bi=True），便于回放探索。
-文档中 market_index.json 给了 reuse_tail_bi:false，建议固定下两套参数表并在 CLI 打印。
+完整数学定义与边界详见：`backend/docs/ALGO_SPEC_trend_v0.3.md`

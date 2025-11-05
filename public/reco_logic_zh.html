@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>推荐逻辑（v0.3）</title>
+    <style>
+      body { font: 16px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,"Noto Sans SC","PingFang SC","Microsoft Yahei",sans-serif; margin: 24px; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <pre id="md">系统依据 **趋势、量价、筹码、结构确认、风险控制** 五维规则，自动筛选“接近主升浪买点”的股票：
+
+        1. **趋势方向**：MA5>MA13>MA39，MA13 向上拐，收盘价站上 MA13；
+        2. **量价确认**：当日成交量 ≥ 5 日均量的 1.5 倍，且收盘价 ≥ 近 5 日最高价的 98%（突破前沿）；
+        3. **涨幅过滤**：日涨幅介于 3%–6%，动能健康不过热；
+        4. **筹码结构（近似）**：近 10 日活跃度提升、波动收敛，价格处于近 30 日上侧区间；
+        5. **风险控制（自动）**：连板 ≥ 3 日直接剔除；
+        6. **结构确认（弱转强）**：今日实体区间上移（max(Open,Close) 大于昨日），确认多头再次主导。
+
+        满足以上条件即进入推荐列表，系统按贴近度打分排序。
+        **提示**：盘中“炸板”、极端乖离等仍需人工复核。
+        </pre>
+  </body>
+</html>

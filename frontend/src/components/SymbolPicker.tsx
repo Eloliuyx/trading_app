@@ -5,57 +5,85 @@ import type { SymbolMeta } from '../types';
 export default function SymbolPicker() {
   const { symbol, setSymbol, loadAllFor, symbols, loadSymbols } = useDataStore();
   const [query, setQuery] = useState(symbol ?? '');
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // 初次挂载先拉一波清单（不带 q）
+  // 初次挂载加载清单
   useEffect(() => { loadSymbols().catch(()=>{}); }, [loadSymbols]);
 
-  // 输入变化时做简单节流搜索
+  // 搜索（简单节流）
   useEffect(() => {
-    const h = setTimeout(() => {
-      if (query && query.length >= 2) loadSymbols(query).catch(()=>{});
-    }, 180);
+    const h = setTimeout(async () => {
+      if (!query || query.length < 2) { setOpen(false); return; }
+      setLoading(true);
+      try { await loadSymbols(query); setOpen(true); } finally { setLoading(false); }
+    }, 220);
     return () => clearTimeout(h);
   }, [query, loadSymbols]);
 
-  useEffect(() => { if (symbol) setQuery(symbol); }, [symbol]);
-
   const onLoad = () => {
-    if (!query) return;
-    // 若用户选择了“名称 (代码)”的格式，提取代码
-    const m = query.match(/\((\d{6}\.(SH|SZ|BJ))\)$/i);
-    const picked = m ? m[1].toUpperCase() : query.trim().toUpperCase();
-    setSymbol(picked);
-    loadAllFor(picked);
+    // 允许输入 “名称（代码）” 或 直接代码
+    const match = query.match(/\(([^)]+)\)\s*$/);
+    const pick = match ? match[1] : query.trim();
+    if (!pick) return;
+    setSymbol(pick);
+    loadAllFor(pick).catch(()=>{});
+    setOpen(false);
   };
 
-  const options = useMemo(() => {
-    const list = symbols ?? [];
-    return list.slice(0, 500); // 防止 datalist 过长
-  }, [symbols]);
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return symbols.slice(0, 20);
+    return symbols.filter(s =>
+      (s.symbol?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q))
+    ).slice(0, 20);
+  }, [symbols, query]);
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <label style={{ fontSize: 12, color: '#6b7280' }}>选择股票</label>
+    <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+      <div style={{ position:'relative', flex:1, minWidth:280 }}>
+        <input
+          value={query}
+          onChange={e=>setQuery(e.target.value)}
+          onFocus={()=> setOpen(!!query && query.length>=2)}
+          placeholder="输入代码或名称（至少 2 个字符）"
+          style={{ width:'100%', padding:'8px 12px', borderRadius:10, border:'1px solid #e5e7eb' }}
+        />
+        {loading && <div style={{ position:'absolute', right:10, top:8, fontSize:12, color:'#9ca3af' }}>正在搜索…</div>}
+        {open && suggestions.length>0 && (
+          <div style={{
+            position:'absolute', zIndex:30, top:'calc(100% + 6px)', left:0, right:0,
+            background:'#fff', border:'1px solid #e5e7eb', borderRadius:12, boxShadow:'0 8px 24px rgba(0,0,0,0.06)',
+            maxHeight:300, overflowY:'auto'
+          }}>
+            {suggestions.map(s => {
+              const label = s.name ? `${s.name} (${s.symbol})` : s.symbol;
+              return (
+                <div
+                  key={s.symbol}
+                  onMouseDown={(e)=>{ e.preventDefault(); setQuery(label); setOpen(false);}}
+                  style={{ padding:'8px 12px', cursor:'pointer' }}
+                  onMouseEnter={(e)=> (e.currentTarget.style.background='#f9fafb')}
+                  onMouseLeave={(e)=> (e.currentTarget.style.background='transparent')}
+                >
+                  {label}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-      <input
-        list="__symbol_list__"
-        value={query}
-        onChange={(e)=>setQuery(e.target.value)}
-        placeholder="代码或名称，例如 600036.SH / 招商银行"
-        style={{ minWidth: 280 }}
-        onKeyDown={(e)=>{ if (e.key === 'Enter') onLoad(); }}
-      />
-      <datalist id="__symbol_list__">
-        {options.map((s: SymbolMeta) => {
-          const label = s.name ? `${s.name} (${s.symbol})` : s.symbol;
-          return <option key={s.symbol} value={label} />;
-        })}
-      </datalist>
-
-      <button onClick={onLoad}>载入</button>
-
-      {/* 唯一的市场入口 */}
-      <a href="/market" style={{ marginLeft: 8, textDecoration: 'none', color: '#6b21a8', fontWeight: 600 }}>
+      <button
+        onClick={onLoad}
+        style={{
+          padding:'8px 14px', borderRadius:10, border:'1px solid #e5e7eb',
+          background:'#111827', color:'#fff', fontWeight:600
+        }}
+      >
+        载入
+      </button>
+      <a href="/market" style={{ textDecoration: 'none', color: '#6b21a8', fontWeight: 600 }}>
         全市场
       </a>
     </div>

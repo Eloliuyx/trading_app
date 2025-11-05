@@ -1,19 +1,22 @@
 {
-    "compilerOptions": {
-      "target": "ES2022",
-      "useDefineForClassFields": true,
-      "lib": ["ES2022", "DOM", "DOM.Iterable"],
-      "module": "ESNext",
-      "skipLibCheck": true,
-      "moduleResolution": "Bundler",
-      "resolveJsonModule": true,
-      "isolatedModules": true,
-      "noEmit": true,
-      "jsx": "react-jsx",
-      "strict": true,
-      "noUnusedLocals": true,
-      "noUnusedParameters": true,
-      "types": ["node", "vite/client"]
-    },
-    "include": ["src"]
-  }
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "useDefineForClassFields": true,
+
+    // 如果你确实需要 Node 类型（例如 import.meta.env、路径操作等），保留它；
+    // 否则可以删掉 "types" 这行，统一靠 vite-env.d.ts 提供。
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

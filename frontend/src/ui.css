@@ -1,0 +1,211 @@
+:root{
+  --bg:#f7f8fb;
+  --panel:#ffffff;
+  --fg:#0f172a;
+  --muted:#64748b;
+  --line:#e5e7eb;
+  --brand:#6b21a8;
+  --accent:#2563eb;
+  --accent-weak:rgba(37,99,235,.10);
+
+  --radius:14px;
+  --radius-sm:10px;
+  --shadow:0 1px 0 rgba(15,23,42,.04),0 10px 30px rgba(2,6,23,.06);
+
+  --fz-xxs:11px;
+  --fz-xs:12px;
+  --fz-sm:13px;
+  --fz-md:14px;
+  --fz-lg:15px;
+  --fz-xl:16px;
+}
+
+
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{
+  margin:0;
+  font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Inter, "Noto Sans", Arial, "Apple Color Emoji","Segoe UI Emoji";
+  background:var(--bg); color:var(--fg);
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* —— 布局 / 头部 —— */
+.header{
+  position:sticky;top:0;z-index:10;
+  backdrop-filter:saturate(150%) blur(6px);
+  background:rgba(255,255,255,.85);
+  border-bottom:1px solid var(--line);
+}
+.header-inner{
+  height:56px;max-width:1120px;margin:0 auto;padding:0 16px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.brand{font-weight:800;color:var(--brand);letter-spacing:-.01em}
+.container{max-width:1120px;margin:0 auto;padding:0 16px}
+
+/* —— 控件 —— */
+.input{
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:8px 10px;min-width:260px;outline:none;font-size:var(--fz-sm);
+  background:#fff;
+}
+.input:focus{border-color:#cbd5e1;box-shadow:0 0 0 3px rgba(203,213,225,.5)}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px 0}
+
+.two-pane{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width: 1100px){ .two-pane{grid-template-columns:360px 1fr}}
+
+/* —— 卡片 / 面板 —— */
+.card{
+  background:var(--panel);border:1px solid #f4f4f5;border-radius:var(--radius);
+  padding:14px;box-shadow:0 1px 0 rgba(0,0,0,.04);
+}
+.card:hover{box-shadow:var(--shadow)}
+
+/* —— 左侧列表 —— */
+.list-head{
+  font-size:var(--fz-xxs);color:#6b7280;background:#fff;
+  border-bottom:1px solid var(--line);padding:8px 10px;border-radius:12px 12px 0 0;
+}
+.list-scroll{overflow:auto;background:#fff}
+.list-item{
+  width:100%;text-align:left;border-bottom:1px solid var(--line);
+  padding:10px 12px;background:#fff;cursor:pointer;
+}
+.list-item:hover{background:#f8fafc}
+.list-item.selected{
+  background:#eef2ff; box-shadow:inset 3px 0 0 #6366f1;
+}
+.list-title{font-size:var(--fz-md);font-weight:600;color:#0f172a;letter-spacing:-.01em}
+.list-sub{
+  font-size:var(--fz-xxs);color:#6b7280;margin-top:2px;
+}
+
+/* —— 右侧 K 线区域 —— */
+.kline-wrap{padding:12px}
+.kline-card{
+  padding:0;border-radius:var(--radius);
+  border:1px solid var(--line);background:#fff;box-shadow:var(--shadow);
+}
+.kline-host{width:100%;height:440px}
+
+/* —— K线工具条 —— */
+.kline-toolbar{
+  border-top:1px solid var(--line);background:#fff;
+  padding:8px 12px;display:flex;align-items:center;gap:8px;
+}
+
+/* —— Notes —— */
+.notes{background:#fff}
+.row{display:flex;align-items:start;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
+.date{font-size:var(--fz-xxs);color:#9ca3af;margin-bottom:2px}
+
+/* —— 文本 —— */
+.h1{font-size:18px;font-weight:800;letter-spacing:-.01em;margin:0}
+.sub{color:var(--muted);font-size:var(--fz-xs);margin-top:2px}
+
+/* —— 滚动条（Webkit）—— */
+.list-scroll::-webkit-scrollbar{width:10px}
+.list-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:999px}
+.list-scroll::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+
+/* —— Skeleton —— */
+.skel{animation:pulse 1.2s ease-in-out infinite;background:#f1f5f9;border-radius:8px}
+@keyframes pulse{0%{opacity:.7}50%{opacity:.4}100%{opacity:.7}}
+
+/* ===== 固定双栏布局：左 340px + 右自适应 ===== */
+.two-pane{
+  display:grid;
+  grid-template-columns: 1fr;        /* 小屏单列 */
+  gap:0;
+}
+@media (min-width: 1024px){
+  .two-pane{
+    grid-template-columns: 340px minmax(0,1fr);  /* 桌面双栏 */
+  }
+}
+.col-left{ min-height:0; border-right:1px solid var(--line); }
+.col-right{ min-height:0; }
+
+/* ---- 彻底隐藏 lightweight-charts 左下角 watermark / logo ---- */
+#root .tv-lightweight-charts-container canvas + div,
+#root .tv-lightweight-charts-container > div:last-child {
+  display: none !important;
+}
+#root div[class*="watermark"],
+#root div[class*="watermark"] * {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+/* ====== Buttons: one system everywhere ====== */
+.btn{
+  -webkit-tap-highlight-color: transparent;
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  padding:9px 14px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#fff; color:var(--fg);
+  font-size:var(--fz-sm); font-weight:600; letter-spacing:-.01em;
+  cursor:pointer; user-select:none;
+  transition: box-shadow .15s ease, transform .02s ease, border-color .15s ease, background .15s ease;
+  box-shadow: 0 1px 0 rgba(15,23,42,.03);
+  /* ✳️ 新增外边距：按钮不会贴在内容上 */
+  margin: 4px 6px;
+}
+.btn:hover{ border-color:#cbd5e1; background:#fafafa; }
+.btn:active{ transform: translateY(0.5px); }
+.btn:focus-visible{ outline:none; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+
+/* 风格类别保持不变 */
+.btn--primary {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: rgba(37,99,235,.25);
+}
+.btn--primary:hover {
+  background: rgba(37,99,235,.15);
+  border-color: rgba(37,99,235,.35);
+}
+.btn--primary:focus-visible{ box-shadow:0 0 0 3px rgba(37,99,235,.25); }
+
+.btn--ghost{
+  background: transparent;
+  border-color: var(--line);
+  color: #334155;
+}
+.btn--ghost:hover{ background:#f8fafc; }
+
+.btn--danger{
+  color:#b91c1c;
+  border-color:#fecaca;
+  background:#fff;
+}
+.btn--danger:hover{ background:#fef2f2; border-color:#fca5a5; }
+
+.btn--muted{
+  color:#475569;
+  background:#f8fafc;
+  border-color:#e2e8f0;
+}
+.btn--muted:hover{ background:#eef2f7; }
+
+.btn--sm{ padding:6px 12px; font-size:var(--fz-xs); border-radius:10px; margin:3px 4px; }
+.btn--xs{ padding:4px 9px; font-size:var(--fz-xxs); border-radius:10px; margin:2px 3px; }
+.btn--icon{ width:32px; height:32px; padding:0; border-radius:10px; margin:3px; }
+
+.btn[disabled]{ opacity:.5; cursor:not-allowed; transform:none; }
+
+/* ====== toolbar container ====== */
+.toolbar{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;                  /* ✳️ 改8→12：按钮之间更宽 */
+  margin-top:8px;            /* ✳️ 与上方内容分隔 */
+  margin-bottom:8px;         /* ✳️ 与下方内容分隔 */
+  padding:4px 0;             /* ✳️ 给按钮组上下预留缓冲 */
+}

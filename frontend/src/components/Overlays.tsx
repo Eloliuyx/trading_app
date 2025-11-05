@@ -39,6 +39,35 @@ const Overlays: React.FC<Props> = ({
   zhongshus = [],
   minSpanBars = 2,
 }) => {
+  // —— 无效位高亮：监听全局事件 ——
+  const priceLineRef = React.useRef<ReturnType<typeof candle.createPriceLine> | null>(null);
+  const currentPriceRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const handler = (e: any) => {
+      const price = e?.detail ?? null;
+      currentPriceRef.current = (typeof price === 'number') ? price : null;
+      if (!candle) return;
+      // 清除旧线
+      if (priceLineRef.current) {
+        candle.removePriceLine(priceLineRef.current);
+        priceLineRef.current = null;
+      }
+      if (typeof price === 'number') {
+        priceLineRef.current = candle.createPriceLine({
+          price,
+          color: '#ef4444',
+          lineWidth: 2,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
+          title: '无效位'
+        });
+      }
+    };
+    window.addEventListener('hlprice', handler as any);
+    return () => window.removeEventListener('hlprice', handler as any);
+  }, [candle]);
+
   // 将 data.time 提取为 Time[]，供 timeToCoordinate 使用
   const times: Time[] = data.map(d => (d.time as Time));
 

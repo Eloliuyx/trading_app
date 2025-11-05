@@ -29,6 +29,7 @@ dist/             # 前端打包产物
 # Outputs
 /out/*            # 忽略 out 目录下所有文件
 !/out/.gitkeep    # 但保留 .gitkeep 这个空文件，让空目录能进仓库
+public/out/market_reco.json
 
 # IDE
 .vscode/          # VS Code 的个人设置
