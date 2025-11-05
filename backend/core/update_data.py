@@ -1,12 +1,14 @@
 # backend/core/update_data.py
 from __future__ import annotations
+
 import argparse
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import List, Optional, Dict
-import time
 import json
 import os
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import pandas as pd
 
 # === 路径约定：默认写入项目根 /public/data ===
@@ -17,18 +19,23 @@ DEFAULT_MANIFEST = PUBLIC / "data_index.json"
 
 TZ_SH = timezone(timedelta(hours=8))
 
+
 # ----------------- 工具函数 -----------------
 def _to_ts_date(d: datetime) -> str:
     return d.strftime("%Y%m%d")  # yyyymmdd
 
+
 def _date_str_yyyymmdd(s: str) -> str:
     return s.replace("-", "")
+
 
 def _today_cn() -> datetime:
     return datetime.now(TZ_SH)
 
+
 def _ymd_to_int(s: str) -> int:
     return int(s.replace("-", ""))
+
 
 # ----------------- 读写 CSV -----------------
 def read_existing(csv_path: Path) -> Optional[pd.DataFrame]:
@@ -42,9 +49,11 @@ def read_existing(csv_path: Path) -> Optional[pd.DataFrame]:
     df["Date"] = pd.to_datetime(df["Date"])
     return df.sort_values("Date").reset_index(drop=True)
 
+
 def save_csv(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
+
 
 # ----------------- Manifest（不逐个读 CSV，挑落后者） -----------------
 def load_manifest(path: Path) -> Dict[str, str]:
@@ -53,10 +62,12 @@ def load_manifest(path: Path) -> Dict[str, str]:
             return json.load(f)
     return {}
 
+
 def save_manifest(path: Path, data: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+
 
 def tail_last_date_from_csv(csv_path: Path) -> Optional[str]:
     if not csv_path.exists():
@@ -80,6 +91,7 @@ def tail_last_date_from_csv(csv_path: Path) -> Optional[str]:
                 return dt_str
     return None
 
+
 def build_manifest_from_dir(out_dir: Path) -> Dict[str, str]:
     m: Dict[str, str] = {}
     for p in sorted(out_dir.glob("*.csv")):
@@ -92,18 +104,22 @@ def build_manifest_from_dir(out_dir: Path) -> Dict[str, str]:
             m[sym] = last  # YYYY-MM-DD
     return m
 
+
 def update_manifest_entry(manifest_path: Path, sym: str, new_last_day: str) -> None:
     m = load_manifest(manifest_path)
     if _ymd_to_int(new_last_day) > _ymd_to_int(m.get(sym, "1900-01-01")):
         m[sym] = new_last_day
         save_manifest(manifest_path, m)
 
+
 # ----------------- Tushare 实现 -----------------
 def _tushare_client(token: Optional[str]):
     import tushare as ts
+
     if token:
         return ts.pro_api(token)
     return ts.pro_api()
+
 
 def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:
     """
@@ -121,6 +137,7 @@ def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:
     last = str(df["trade_date"].max())  # e.g. 20251103
     return f"{last[:4]}-{last[4:6]}-{last[6:8]}"
 
+
 def _fetch_daily_tushare(
     pro,
     ts_code: str,
@@ -134,17 +151,20 @@ def _fetch_daily_tushare(
         params["end_date"] = end_date
     df = pro.daily(**params)
     if df is None or df.empty:
-        return pd.DataFrame(columns=["Date","Open","High","Low","Close","Volume"])
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume"])
     df = df.sort_values("trade_date").reset_index(drop=True)
-    out = pd.DataFrame({
-        "Date": pd.to_datetime(df["trade_date"]),
-        "Open": df["open"].astype(float),
-        "High": df["high"].astype(float),
-        "Low": df["low"].astype(float),
-        "Close": df["close"].astype(float),
-        "Volume": df["vol"].astype(float),  # 单位：手
-    })
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df["trade_date"]),
+            "Open": df["open"].astype(float),
+            "High": df["high"].astype(float),
+            "Low": df["low"].astype(float),
+            "Close": df["close"].astype(float),
+            "Volume": df["vol"].astype(float),  # 单位：手
+        }
+    )
     return out
+
 
 def _merge_incremental(existing: Optional[pd.DataFrame], new_df: pd.DataFrame) -> pd.DataFrame:
     if existing is None or existing.empty:
@@ -155,11 +175,12 @@ def _merge_incremental(existing: Optional[pd.DataFrame], new_df: pd.DataFrame) -
     merged = merged.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
     return merged
 
+
 def update_one_tushare(
     pro,
     ts_code: str,
     out_dir: Path,
-    latest_open_day: str,             # YYYY-MM-DD（用基准股票推断）
+    latest_open_day: str,  # YYYY-MM-DD（用基准股票推断）
     last_date_hint: Optional[str] = None,  # 来自 manifest 的提示，减少一次读盘
 ) -> None:
     """
@@ -191,7 +212,9 @@ def update_one_tushare(
         if start_dt > datetime.fromisoformat(latest_open_day).date():
             print(f"[skip] {ts_code} up-to-date ({last_dt})")
             return
-        start_yyyymmdd = _to_ts_date(datetime(start_dt.year, start_dt.month, start_dt.day, tzinfo=TZ_SH))
+        start_yyyymmdd = _to_ts_date(
+            datetime(start_dt.year, start_dt.month, start_dt.day, tzinfo=TZ_SH)
+        )
 
     new_df = _fetch_daily_tushare(pro, ts_code, start_yyyymmdd, end_yyyymmdd)
 
@@ -205,7 +228,10 @@ def update_one_tushare(
 
     save_csv(merged, csv_path)
     last = merged["Date"].iloc[-1].date()
-    print(f"[ok] {ts_code}: {len(existing) if existing is not None else 0} -> {len(merged)} rows (last={last})")
+    print(
+        f"[ok] {ts_code}: {len(existing) if existing is not None else 0} -> {len(merged)} rows (last={last})"
+    )
+
 
 # ----------------- 任务选择 -----------------
 def iter_symbols_from_public_data(out_dir: Path) -> List[str]:
@@ -219,7 +245,10 @@ def iter_symbols_from_public_data(out_dir: Path) -> List[str]:
             syms.append(sym)
     return syms
 
-def select_stale_symbols(latest_open_day: str, symbols: List[str], manifest_path: Path) -> List[str]:
+
+def select_stale_symbols(
+    latest_open_day: str, symbols: List[str], manifest_path: Path
+) -> List[str]:
     """
     使用 manifest 与 latest_open_day 对比，仅挑“落后”的 symbol。
     不逐个读 CSV。
@@ -235,21 +264,42 @@ def select_stale_symbols(latest_open_day: str, symbols: List[str], manifest_path
             stale.append(sym)
     return stale
 
+
 # ----------------- CLI -----------------
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", choices=["tushare"], default="tushare")
     parser.add_argument("--token", help="Tushare token（可不填，默认读环境变量 TUSHARE_TOKEN）")
-    parser.add_argument("--all", action="store_true", help="更新 out_dir 下已存在的全部 symbol（或 symbols.csv 列表）")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="更新 out_dir 下已存在的全部 symbol（或 symbols.csv 列表）",
+    )
     parser.add_argument("--symbol", help="仅更新单只，如 600519.SH")
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUT), help="输出目录，默认项目根/public/data")
+    parser.add_argument(
+        "--out-dir", default=str(DEFAULT_OUT), help="输出目录，默认项目根/public/data"
+    )
 
     # manifest / 只更新落后 / 窗口限制 / 基准股票
-    parser.add_argument("--build-manifest", action="store_true", help="仅从现有 CSV 构建 manifest 索引后退出")
-    parser.add_argument("--only-stale", action="store_true", help="仅处理 manifest 判定为落后的 symbol（不逐个读 CSV）")
-    parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="manifest 文件路径，默认 public/data_index.json")
-    parser.add_argument("--since-days", type=int, default=None, help="最多回补最近 N 天（可选；用于限制抓取窗口）")
-    parser.add_argument("--bench-symbol", default="000001.SZ", help="用此基准股票推断最近开市日（默认 000001.SZ）")
+    parser.add_argument(
+        "--build-manifest", action="store_true", help="仅从现有 CSV 构建 manifest 索引后退出"
+    )
+    parser.add_argument(
+        "--only-stale",
+        action="store_true",
+        help="仅处理 manifest 判定为落后的 symbol（不逐个读 CSV）",
+    )
+    parser.add_argument(
+        "--manifest",
+        default=str(DEFAULT_MANIFEST),
+        help="manifest 文件路径，默认 public/data_index.json",
+    )
+    parser.add_argument(
+        "--since-days", type=int, default=None, help="最多回补最近 N 天（可选；用于限制抓取窗口）"
+    )
+    parser.add_argument(
+        "--bench-symbol", default="000001.SZ", help="用此基准股票推断最近开市日（默认 000001.SZ）"
+    )
 
     args = parser.parse_args()
 
@@ -283,17 +333,25 @@ def main():
         base = iter_symbols_from_public_data(out_dir)
         if args.only_stale:
             todo = select_stale_symbols(latest_open_day, base, manifest_path)
-            print(f"[plan] only-stale: {len(todo)} / {len(base)} 需要更新（最新开市日 {latest_open_day}）")
+            print(
+                f"[plan] only-stale: {len(todo)} / {len(base)} 需要更新（最新开市日 {latest_open_day}）"
+            )
         else:
             todo = base
     else:
         print("用法示例：")
         print("  # 扫描一次现有 CSV，建立索引")
-        print("  python -m backend.core.update_data --provider tushare --build-manifest --manifest public/data_index.json")
+        print(
+            "  python -m backend.core.update_data --provider tushare --build-manifest --manifest public/data_index.json"
+        )
         print("  # 之后每天只更新确实落后的（不逐个读 CSV）")
-        print("  python -m backend.core.update_data --provider tushare --all --only-stale --manifest public/data_index.json")
+        print(
+            "  python -m backend.core.update_data --provider tushare --all --only-stale --manifest public/data_index.json"
+        )
         print("  # 只用日线推断最新开市日，指定基准股票")
-        print("  python -m backend.core.update_data --provider tushare --all --only-stale --bench-symbol 000001.SZ")
+        print(
+            "  python -m backend.core.update_data --provider tushare --all --only-stale --bench-symbol 000001.SZ"
+        )
         print("  # 单只更新")
         print("  python -m backend.core.update_data --provider tushare --symbol 600519.SH")
         return
@@ -343,6 +401,7 @@ def main():
             time.sleep(1.3)  # 降速，省积分
         except Exception as e:
             print(f"[error] {ts_code}: {e}")
+
 
 if __name__ == "__main__":
     main()

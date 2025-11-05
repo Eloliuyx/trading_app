@@ -1,16 +1,22 @@
 # backend/core/reco_cli.py
 from __future__ import annotations
-import argparse, json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Dict, Any, List
 
-import pandas as pd
+import argparse
+import json
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List
 
-from .reco_io import list_price_files, read_prices, symbol_from_filename, read_symbols_meta, get_public_out_path
-from .reco import analyze_symbol, MetaRow, RULES_VERSION
+from .reco import RULES_VERSION, MetaRow, analyze_symbol
+from .reco_io import (
+    get_public_out_path,
+    list_price_files,
+    read_prices,
+    read_symbols_meta,
+    symbol_from_filename,
+)
 
 TZ_SH = timezone(timedelta(hours=8))
+
 
 def run_all() -> Dict[str, Any]:
     meta_df = read_symbols_meta()
@@ -29,7 +35,9 @@ def run_all() -> Dict[str, Any]:
         row = meta_df.loc[meta_df["symbol"] == symbol]
         if row.empty:
             # 元数据缺失时提供兜底
-            meta = MetaRow(symbol=symbol, name=symbol, industry="未知行业", market="主板", is_st=False)
+            meta = MetaRow(
+                symbol=symbol, name=symbol, industry="未知行业", market="主板", is_st=False
+            )
         else:
             r = row.iloc[0]
             meta = MetaRow(
@@ -37,7 +45,7 @@ def run_all() -> Dict[str, Any]:
                 name=str(r["name"]),
                 industry=str(r["industry"]),
                 market=str(r["market"]),
-                is_st=bool(r["is_st"])
+                is_st=bool(r["is_st"]),
             )
 
         item = analyze_symbol(df, meta)
@@ -56,6 +64,7 @@ def run_all() -> Dict[str, Any]:
     }
     return payload
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--write", action="store_true", help="写入 public/out/market_reco.json")
@@ -69,6 +78,7 @@ def main():
         print(f"✅ wrote {out_path} ({payload['count']} items)")
     else:
         print(json.dumps(payload, ensure_ascii=False)[:2000] + " ...")
+
 
 if __name__ == "__main__":
     main()

@@ -1,18 +1,24 @@
 # 仅示意：确保指向 public/out
-from pathlib import Path
 import json
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Trading_App API (trend-v0.3)")
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJ = ROOT.parent
 PUBLIC = PROJ / "public"
 MARKET_JSON = PUBLIC / "out" / "market_reco.json"
+
 
 @app.get("/api/reco/market")
 def market():
