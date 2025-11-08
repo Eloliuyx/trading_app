@@ -1,0 +1,64 @@
+.
+├── README.md
+├── backend
+│   ├── core
+│   │   ├── __init__.py
+│   │   ├── cli.py
+│   │   ├── export_universe.py
+│   │   ├── io.py
+│   │   ├── reco.py
+│   │   ├── reco_cli.py
+│   │   ├── reco_io.py
+│   │   └── update_data.py
+│   ├── docs
+│   │   ├── ALGO_SPEC_trend_v0.3.md
+│   │   └── API_CONTRACT.md
+│   ├── legacy
+│   │   └── chan
+│   ├── pytest.ini
+│   ├── server.py
+│   └── trading_app_core.egg-info
+│       ├── PKG-INFO
+│       ├── SOURCES.txt
+│       ├── dependency_links.txt
+│       ├── requires.txt
+│       └── top_level.txt
+├── frontend
+│   ├── index.html
+│   ├── src
+│   │   ├── App.tsx
+│   │   ├── components
+│   │   ├── main.tsx
+│   │   ├── pages
+│   │   ├── store.ts
+│   │   ├── types.ts
+│   │   ├── ui.css
+│   │   ├── utils
+│   │   └── vite-env.d.ts
+│   ├── symbol.html
+│   ├── tsconfig.json
+│   └── vite.config.mts
+├── gitignore
+├── logs
+│   ├── update_failed.txt
+│   └── update_resume.txt
+├── package-lock.json
+├── package.json
+├── public
+│   ├── data
+│   │   └── metadata
+│   ├── data_index.json
+│   ├── out
+│   │   ├── 600519.SH.json
+│   │   ├── market_index.json
+│   │   └── universe.json
+│   └── reco_logic_zh.html
+├── pyproject.toml
+├── scripts
+│   ├── GENERATE_SYMBOLS_AKSHARE.md
+│   └── dev.mjs
+├── structure.txt
+└── tests
+    └── legacy
+
+20 directories, 5486 files

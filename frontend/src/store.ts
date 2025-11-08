@@ -1,23 +1,18 @@
+// src/store.ts
 import { create } from "zustand";
 
-/** —— 类型 —— */
+/** ========= 基础类型 ========= */
+
 export type PriceLine = { id: string; price: number; title?: string };
-export type Note = { id: string; date: string; text: string };
 
-export type FilterState = { [k: string]: any };
-
-export type MarketPoint = {
-  ts?: string;
-  date?: string;
-  name?: string;
-  value?: number;
-  [k: string]: any;
-};
+export type Note = { id: string; ts: string; text: string };
 
 export type MarketSnapshot = {
   asof?: string;
-  indices?: MarketPoint[];
-  breadth?: MarketPoint[];
+  last_bar_date?: string;
+  rules_version?: string;
+  status?: "OK" | "NO_DATA" | "ERROR";
+  error?: string;
   [k: string]: any;
 };
 
@@ -26,296 +21,445 @@ export type StockItem = {
   name: string;
   industry?: string;
   market?: string;
-  reco?: string;
+  last_date?: string;
+  is_st?: boolean;
   score?: number;
   bucket?: string;
-  features?: Record<string, any>;
+  reasons?: string[];
+  [k: string]: any;
 };
 
-export type StockLite = StockItem;
-
-export type UniverseRaw = {
-  asof?: string;
-  list: any[];
+export type KLineBar = {
+  time: string | number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
 };
 
-export type DataStore = {
-  asof: string | null;
+/** ========= F1-F9 ========= */
+
+export type FKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9";
+
+export type FilterState = {
+  q: string;
+} & { [K in FKey]: boolean };
+
+const defaultFilter: FilterState = {
+  q: "",
+  F1: false,
+  F2: false,
+  F3: false,
+  F4: false,
+  F5: false,
+  F6: false,
+  F7: false,
+  F8: false,
+  F9: false,
+};
+
+type FactorConfig = {
+  key: FKey;
+  label: string;
+  test: (s: StockItem) => boolean;
+};
+
+export const FACTOR_CONFIG: FactorConfig[] = [
+  {
+    key: "F1",
+    label: "F1 剔除ST/风险股",
+    test: (s) => {
+      if (s.f_exclude_st !== undefined) return !!s.f_exclude_st;
+      if (s.is_st !== undefined) return !s.is_st;
+      return true;
+    },
+  },
+  {
+    key: "F2",
+    label: "F2 强流动性",
+    test: (s) => {
+      if (s.f_liquid_strong !== undefined) return !!s.f_liquid_strong;
+      const v = s.amt60_avg;
+      if (v == null) return true;
+      return v >= 50_000_000;
+    },
+  },
+  {
+    key: "F3",
+    label: "F3 合理价格区间",
+    test: (s) => {
+      if (s.f_price_floor !== undefined) return !!s.f_price_floor;
+      const c = s.close;
+      if (c == null) return true;
+      return c >= 3 && c <= 80;
+    },
+  },
+  {
+    key: "F4",
+    label: "F4 高成交额",
+    test: (s) => {
+      const a = s.amount_t ?? s.amount;
+      if (a == null) return true;
+      return a >= 20_000_000;
+    },
+  },
+  {
+    key: "F5",
+    label: "F5 放量确认",
+    test: (s) => {
+      const vr = s.vr ?? s.vol_ratio20 ?? s.vol_ratio10;
+      if (vr == null) return true;
+      return vr >= 1.2;
+    },
+  },
+  {
+    key: "F6",
+    label: "F6 行业相对强",
+    test: (s) => {
+      const r = s.industry_rs20 ?? s.industry_rs ?? s.industry_rank;
+      if (r == null) return true;
+      return (r > 0 && r <= 0.3) || r <= 30;
+    },
+  },
+  {
+    key: "F7",
+    label: "F7 强势行业/主题",
+    test: () => true,
+  },
+  {
+    key: "F8",
+    label: "F8 多头均线",
+    test: (s) => {
+      const f = s.f_bull_ma ?? s.trend_bull ?? s.bull_ma;
+      if (f == null) return true;
+      return !!f;
+    },
+  },
+  {
+    key: "F9",
+    label: "F9 突破/趋势强化",
+    test: (s) => {
+      const f = s.f_breakout ?? s.trend_breakout;
+      if (f == null) return true;
+      return !!f;
+    },
+  },
+];
+
+/** ========= 工具 ========= */
+
+async function fetchJSON(url: string) {
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  return res.json();
+}
+
+async function fetchText(url: string) {
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  return res.text();
+}
+
+/** JSON -> K线 */
+function normalizeKlineFromJson(raw: any): KLineBar[] {
+  const arr: any[] =
+    Array.isArray(raw) ? raw :
+    Array.isArray(raw.list) ? raw.list :
+    Array.isArray(raw.bars) ? raw.bars :
+    [];
+  return arr
+    .map((b) => {
+      const time = b.time ?? b.date ?? b.Date ?? b.trade_date;
+      const open = b.open ?? b.Open;
+      const high = b.high ?? b.High;
+      const low = b.low ?? b.Low;
+      const close = b.close ?? b.Close;
+      const vol = b.volume ?? b.Volume ?? b.vol;
+      if (
+        time === undefined ||
+        open === undefined ||
+        high === undefined ||
+        low === undefined ||
+        close === undefined
+      )
+        return null;
+      return {
+        time,
+        open: Number(open),
+        high: Number(high),
+        low: Number(low),
+        close: Number(close),
+        volume: vol != null ? Number(vol) : undefined,
+      } as KLineBar;
+    })
+    .filter(Boolean) as KLineBar[];
+}
+
+/** CSV(Date,Open,High,Low,Close,Volume) -> K线 */
+function normalizeKlineFromCsv(text: string): KLineBar[] {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length <= 1) return [];
+  const headers = lines[0].split(",").map((s) => s.trim());
+  const idx = (name: string) =>
+    headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+  const iDate = idx("Date");
+  const iOpen = idx("Open");
+  const iHigh = idx("High");
+  const iLow = idx("Low");
+  const iClose = idx("Close");
+  const iVol = idx("Volume");
+  if (iDate < 0 || iOpen < 0 || iHigh < 0 || iLow < 0 || iClose < 0) {
+    return [];
+  }
+  const out: KLineBar[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i]) continue;
+    const cols = lines[i].split(",");
+    const time = cols[iDate];
+    const open = Number(cols[iOpen]);
+    const high = Number(cols[iHigh]);
+    const low = Number(cols[iLow]);
+    const close = Number(cols[iClose]);
+    const vol = iVol >= 0 ? Number(cols[iVol]) : undefined;
+    if ([open, high, low, close].some((v) => Number.isNaN(v))) continue;
+    out.push({ time, open, high, low, close, volume: vol });
+  }
+  return out;
+}
+
+/** notes 持久化 */
+
+const NOTES_KEY = "ta_notes_v1";
+
+function loadInitialNotesMap(): Record<string, Note[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(NOTES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveNotesMap(map: Record<string, Note[]>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(NOTES_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+/** ========= Store ========= */
+
+type DataStore = {
+  market: MarketSnapshot | null;
   stocks: StockItem[];
-  symbols: StockItem[];
+  selectedSymbol: string | null;
   filter: FilterState;
 
-  selectedSymbol: string | null;
-  setSelectedSymbol: (s: string | null) => void;
+  klineMap: Record<string, KLineBar[]>;
+  lineMap: Record<string, PriceLine[]>;
+  notesMap: Record<string, Note[]>;
 
-  symbol: string | null;
-  setSymbol: (s: string | null) => void;
+  loadMarket: () => Promise<void>;
+  setFilter: (patch: Partial<FilterState>) => void;
+  toggleFlag: (key: FKey) => void;
+  setSelectedSymbol: (symbol: string | null) => void;
 
-  setFilter: (p: Partial<FilterState>) => void;
-  setStocks: (items: StockItem[]) => void;
-
-  outJson: UniverseRaw | null;
-  loadSymbols: () => Promise<void>;
-  loadAllFor: (symbol: string) => Promise<void>;
-
-  kline: Record<string, any>;
-  analysis: Record<string, any>;
-
+  loadKline: (symbol: string) => Promise<void>;
   getLines: (symbol: string) => PriceLine[];
-  addLine: (symbol: string, price: number, title?: string) => void;
+  addLine: (symbol: string, line: PriceLine) => void;
   removeLine: (symbol: string, id: string) => void;
-  replaceLines: (symbol: string, lines: PriceLine[]) => void;
 
   getNotes: (symbol: string) => Note[];
   addNote: (symbol: string, text: string) => void;
   deleteNote: (symbol: string, id: string) => void;
-
-  loadMarket: () => Promise<void>;
-  market: MarketSnapshot | null;
 };
 
-/** —— 本地存取工具 —— */
-const keyLines = (sym: string) => `lines_${sym}`;
-const keyNotes = (sym: string) => `notes_${sym}`;
-
-function readJSON<T>(key: string, fallback: T): T {
-  try {
-    const s = localStorage.getItem(key);
-    return s ? (JSON.parse(s) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function writeJSON<T>(key: string, v: T) {
-  try {
-    localStorage.setItem(key, JSON.stringify(v));
-  } catch {}
-}
-
-function toNum(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function isNum(v: any): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-/** —— 将 /out/universe.json 的一项归一成 StockItem —— */
-function normalizeItem(it: any): StockItem {
-  const f0 = (it?.features ?? {}) as Record<string, any>;
-
-  // 兼容 amt60_avg 在顶层或 features 中
-  const amt60 =
-    (typeof f0.amt60_avg === "number" ? f0.amt60_avg : undefined) ??
-    (typeof it.amt60_avg === "number" ? it.amt60_avg : undefined) ??
-    0;
-
-  // 抽出常用原始数值
-  const close = toNum(f0.close ?? it.close);
-  const amount_t = toNum(f0.amount_t ?? it.amount_t);        // 今日成交额
-  const vr = toNum(f0.vr ?? it.vr);                           // 相对均量
-  const ma5 = toNum(f0.ma5 ?? it.ma5);
-  const ma13 = toNum(f0.ma13 ?? it.ma13);
-  const ma39 = toNum(f0.ma39 ?? it.ma39);
-  const indRS = toNum(f0.industry_rs20 ?? it.industry_rs20);  // 板块强弱 0~1
-
-  const features: Record<string, any> = {
-    ...f0,
-    amt60_avg: Number.isFinite(amt60) ? amt60 : 0,
-  };
-
-  // 把顶层可能存在的 f_* 也纳入 features（不覆盖已有）
-  for (const k of Object.keys(it ?? {})) {
-    if (k.startsWith("f_") && features[k] === undefined) {
-      features[k] = it[k];
-    }
-  }
-
-  // ===== 前端兜底：若缺失则依据数值派生（偏宽松，避免全空） =====
-  const AMT_RATIO = 1.05;  // 今日成交额 ≥ 1.05 × 60日均额
-  const VR_MIN = 1.10;     // VR ≥ 1.10
-  const IND_TOP5 = 0.70;   // 行业Top5 近似
-  const IND_STRONG = 0.60; // 强势板块近似
-  const BULL_TOL = 0.97;   // 收盘 ≥ 0.97 × MA5 且 MA5≥MA13≥MA39
-
-  if (features.f_high_amt === undefined) {
-    features.f_high_amt =
-      isNum(amount_t) && isNum(amt60) && amt60 > 0 && amount_t >= AMT_RATIO * amt60;
-  }
-
-  if (features.f_high_vr === undefined) {
-    features.f_high_vr = isNum(vr) && vr >= VR_MIN;
-  }
-
-  if (features.f_ind_rank_top5 === undefined) {
-    features.f_ind_rank_top5 = isNum(indRS) && indRS >= IND_TOP5;
-  }
-
-  if (features.f_strong_industry === undefined) {
-    features.f_strong_industry = isNum(indRS) && indRS >= IND_STRONG;
-  }
-
-  if (features.f_bull_ma === undefined) {
-    features.f_bull_ma =
-      isNum(ma5) &&
-      isNum(ma13) &&
-      isNum(ma39) &&
-      ma5 >= ma13 &&
-      ma13 >= ma39 &&
-      isNum(close) &&
-      close >= BULL_TOL * ma5;
-  }
-  // ============================================================
-
-  return {
-    symbol: it.symbol,
-    name: it.name,
-    industry: it.industry,
-    market: it.market,
-    reco: it.reco,
-    score: it.score,
-    features,
-  };
-}
-
-/** —— Zustand Store —— */
 export const useDataStore = create<DataStore>((set, get) => ({
-  asof: null,
-  stocks: [],
-  symbols: [],
   market: null,
-  filter: {},
-
+  stocks: [],
   selectedSymbol: null,
-  setSelectedSymbol: (s) => set({ selectedSymbol: s, symbol: s }),
+  filter: defaultFilter,
+  klineMap: {},
+  lineMap: {},
+  notesMap: loadInitialNotesMap(),
 
-  // ➕ 别名：保持与 selectedSymbol 同步
-  symbol: null,
-  setSymbol: (s) => set({ selectedSymbol: s, symbol: s }),
-
-  setFilter: (p) => set((s) => ({ filter: { ...s.filter, ...p } })),
-
-  // ⭐ 关键修复：任何入口来的 items，都统一 normalize 一遍
-  setStocks: (items) => {
-    const normalized = (items ?? []).map(normalizeItem);
-    // 默认按流动性降序
-    normalized.sort((a, b) => {
-      const av = Number(a.features?.amt60_avg ?? 0);
-      const bv = Number(b.features?.amt60_avg ?? 0);
-      return bv - av;
-    });
-    set({
-      stocks: normalized,
-      symbols: normalized,
-    });
-  },
-
-  // —— 载入 universe —— //
-  outJson: null,
-  kline: {},
-  analysis: {},
-
-  loadSymbols: async () => {
-    if (get().stocks.length > 0) return;
-
-    const res = await fetch("/out/universe.json", { cache: "no-cache" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = (await res.json()) as UniverseRaw;
-
-    const list = Array.isArray(raw.list) ? raw.list.map(normalizeItem) : [];
-
-    // 按流动性降序
-    list.sort((a, b) => {
-      const av = Number(a.features?.amt60_avg ?? 0);
-      const bv = Number(b.features?.amt60_avg ?? 0);
-      return bv - av;
-    });
-
-    set({
-      asof: raw.asof ?? null,
-      outJson: raw,
-      stocks: list,
-      symbols: list,
-    });
-  },
-
-  loadMarket: async () => {
+  async loadMarket() {
     try {
-      const r = await fetch("/out/market.json", { cache: "no-cache" });
-      if (r.ok) {
-        const payload = (await r.json()) as MarketSnapshot;
-        set({ market: payload });
-        return;
+      let raw: any;
+      try {
+        raw = await fetchJSON("/out/universe.json");
+      } catch {
+        raw = await fetchJSON("/universe.json");
       }
-    } catch {}
-    try {
-      const r2 = await fetch("/api/market/snapshot", { cache: "no-cache" });
-      if (r2.ok) {
-        const payload = (await r2.json()) as MarketSnapshot;
-        set({ market: payload });
+
+      let listRaw: any[] = [];
+      let asof: string | undefined;
+      let lastBarDate: string | undefined;
+      let rulesVersion: string | undefined;
+
+      if (Array.isArray(raw)) {
+        listRaw = raw;
+      } else if (Array.isArray(raw.list)) {
+        listRaw = raw.list;
+        asof = raw.asof;
+        lastBarDate = raw.last_bar_date;
+        rulesVersion = raw.rules_version;
+      } else {
+        throw new Error("universe.json format invalid");
       }
-    } catch {}
+
+      const list: StockItem[] = listRaw.map((it) => {
+        const { features, ...rest } = it;
+        return { ...rest, ...(features || {}) } as StockItem;
+      });
+
+      const market: MarketSnapshot = {
+        asof,
+        last_bar_date: lastBarDate,
+        rules_version: rulesVersion,
+        status: list.length ? "OK" : "NO_DATA",
+      };
+
+      set({ market, stocks: list });
+    } catch (e: any) {
+      console.error("[loadMarket] failed:", e);
+      set({
+        market: {
+          status: "ERROR",
+          error: e?.message || String(e),
+        },
+        stocks: [],
+      });
+    }
   },
 
-  // —— 拉取某只股票的 K 线 & 分析（有啥拿啥，失败忽略） —— //
-  loadAllFor: async (symbol: string) => {
-    try {
-      const qs = new URLSearchParams({ symbol, tf: "1d" });
-      const r = await fetch(`/api/series-c/bundle?${qs.toString()}`, { cache: "no-cache" });
-      if (r.ok) {
-        const payload = await r.json();
-        set((s) => ({ kline: { ...s.kline, [symbol]: payload } }));
+  setFilter(patch) {
+    set((state) => ({
+      filter: { ...state.filter, ...patch },
+    }));
+  },
+
+  toggleFlag(key) {
+    set((state) => ({
+      filter: { ...state.filter, [key]: !state.filter[key] },
+    }));
+  },
+
+  setSelectedSymbol(symbol) {
+    set({ selectedSymbol: symbol });
+  },
+
+  async loadKline(symbol) {
+    if (!symbol) return;
+    const cached = get().klineMap[symbol];
+    if (cached && cached.length) return;
+
+    const jsonUrls = [
+      `/out/${symbol}.json`,
+      `/out/kline/${symbol}.json`,
+      `/kline/${symbol}.json`,
+    ];
+    for (const url of jsonUrls) {
+      try {
+        const raw = await fetchJSON(url);
+        const bars = normalizeKlineFromJson(raw);
+        if (bars.length) {
+          set((state) => ({
+            klineMap: { ...state.klineMap, [symbol]: bars },
+          }));
+          return;
+        }
+      } catch {
+        // try next
       }
-    } catch {}
+    }
 
-    try {
-      const qs = new URLSearchParams({ symbol });
-      const r = await fetch(`/api/analysis?${qs.toString()}`, { cache: "no-cache" });
-      if (r.ok) {
-        const payload = await r.json();
-        set((s) => ({ analysis: { ...s.analysis, [symbol]: payload } }));
+    const csvUrls = [`/data/${symbol}.csv`];
+    for (const url of csvUrls) {
+      try {
+        const text = await fetchText(url);
+        const bars = normalizeKlineFromCsv(text);
+        if (bars.length) {
+          set((state) => ({
+            klineMap: { ...state.klineMap, [symbol]: bars },
+          }));
+          return;
+        }
+      } catch {
+        // try next
       }
-    } catch {}
+    }
+
+    console.warn(`[loadKline] no kline for ${symbol}`);
+    set((state) => ({
+      klineMap: { ...state.klineMap, [symbol]: [] },
+    }));
   },
 
-  // —— 价位线 —— //
-  getLines: (symbol) => readJSON<PriceLine[]>(keyLines(symbol), []),
-  addLine: (symbol, price, title) => {
-    const cur = readJSON<PriceLine[]>(keyLines(symbol), []);
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const next = [...cur, { id, price, title }];
-    writeJSON(keyLines(symbol), next);
-    if (get().selectedSymbol === symbol) set((s) => ({ ...s }));
-  },
-  removeLine: (symbol, id) => {
-    const cur = readJSON<PriceLine[]>(keyLines(symbol), []);
-    writeJSON(
-      keyLines(symbol),
-      cur.filter((x) => x.id !== id)
-    );
-    if (get().selectedSymbol === symbol) set((s) => ({ ...s }));
-  },
-  replaceLines: (symbol, lines) => {
-    writeJSON(keyLines(symbol), lines);
-    if (get().selectedSymbol === symbol) set((s) => ({ ...s }));
+  getLines(symbol) {
+    return get().lineMap[symbol] || [];
   },
 
-  // —— 笔记 —— //
-  getNotes: (symbol) => readJSON<Note[]>(keyNotes(symbol), []),
-  addNote: (symbol, text) => {
-    const cur = readJSON<Note[]>(keyNotes(symbol), []);
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const date = new Date().toISOString().slice(0, 10);
-    const next = [{ id, date, text }, ...cur];
-    writeJSON(keyNotes(symbol), next);
-    if (get().selectedSymbol === symbol) set((s) => ({ ...s }));
+  addLine(symbol, line) {
+    if (!symbol) return;
+    set((state) => {
+      const prev = state.lineMap[symbol] || [];
+      const next = { ...state.lineMap, [symbol]: [...prev, line] };
+      return { lineMap: next };
+    });
   },
-  deleteNote: (symbol, id) => {
-    const cur = readJSON<Note[]>(keyNotes(symbol), []);
-    writeJSON(
-      keyNotes(symbol),
-      cur.filter((n) => n.id !== id)
-    );
-    if (get().selectedSymbol === symbol) set((s) => ({ ...s }));
+
+  removeLine(symbol, id) {
+    if (!symbol) return;
+    set((state) => {
+      const prev = state.lineMap[symbol] || [];
+      const next = {
+        ...state.lineMap,
+        [symbol]: prev.filter((l) => l.id !== id),
+      };
+      return { lineMap: next };
+    });
+  },
+
+  getNotes(symbol) {
+    if (!symbol) return [];
+    return get().notesMap[symbol] || [];
+  },
+
+  addNote(symbol, text) {
+    if (!symbol || !text.trim()) return;
+    const note: Note = {
+      id: `n_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      ts: new Date().toISOString(),
+      text: text.trim(),
+    };
+    set((state) => {
+      const prev = state.notesMap[symbol] || [];
+      const nextMap = {
+        ...state.notesMap,
+        [symbol]: [note, ...prev],
+      };
+      saveNotesMap(nextMap);
+      return { notesMap: nextMap };
+    });
+  },
+
+  deleteNote(symbol, id) {
+    if (!symbol) return;
+    set((state) => {
+      const prev = state.notesMap[symbol] || [];
+      const nextMap = {
+        ...state.notesMap,
+        [symbol]: prev.filter((n) => n.id !== id),
+      };
+      saveNotesMap(nextMap);
+      return { notesMap: nextMap };
+    });
   },
 }));

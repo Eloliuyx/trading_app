@@ -8,7 +8,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
-RULES_VERSION = "trend-v0.3"
+# 与新版规则对应的版本号
+RULES_VERSION = "trend-v1.0-core"
 
 
 @dataclass
@@ -17,158 +18,150 @@ class MetaRow:
     name: str
     industry: str
     market: str
-    is_st: bool
+    is_st: bool = False
+    is_delisting: bool = False
+    is_suspended: bool = False
+    float_shares: float | None = None
 
 
 def ma(s: pd.Series, n: int) -> pd.Series:
     return s.rolling(n, min_periods=n).mean()
 
 
-def stdev(s: pd.Series, n: int) -> pd.Series:
-    return s.rolling(n, min_periods=n).std(ddof=0)
-
-
-def percentile(arr: pd.Series, p: float) -> float:
-    if len(arr) == 0:
-        return float("nan")
-    return np.percentile(arr.to_numpy(), p * 100, method="linear")
-
-
-def clamp(x: float, lo=0.0, hi=1.0) -> float:
-    return max(lo, min(hi, x))
-
-
-def infer_limit_pct(is_st: bool, market: str) -> float:
-    if is_st:
-        return 0.05
-    if market in ("创业板", "科创板"):
-        return 0.20
-    return 0.10
-
-
 def select_today(df: pd.DataFrame, meta: MetaRow) -> Dict[str, Any]:
     """
-    对单票在最后一根K上做规则判断与打分。
-    返回字典（若不满足，返回 {}）。
+    基于单票日线，在最后一根K上应用 F1–F4（不含横截面板块部分）。
+    若不满足核心条件，返回 {}。
     """
-    if len(df) < 40:
+    if len(df) < 60:
         return {}
+
+    df = df.copy()
+    for c in ["Open", "High", "Low", "Close", "Volume"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
 
     close = df["Close"]
     high = df["High"]
     vol = df["Volume"]
-    open_ = df["Open"]
+
+    t = len(df) - 1
+    if t < 1:
+        return {}
+
+    last_close = float(close.iloc[t])
+    prev_close = float(close.iloc[t - 1])
 
     ma5 = ma(close, 5)
     ma13 = ma(close, 13)
     ma39 = ma(close, 39)
+    ma5_shift_5 = ma5.shift(5)
 
-    vol_ma5 = ma(vol, 5)
-    vol_ma10 = ma(vol, 10)
+    # ===== F1: 强流动性_v2（本地估算版） =====
+    if "Amount" in df.columns:
+        amt = pd.to_numeric(df["Amount"], errors="coerce")
+    else:
+        # 粗估：Price * Volume * 100
+        amt = close * vol * 100.0
+    amt60 = amt.rolling(60, min_periods=60).mean()
+    amt60_last = float(amt60.iloc[t]) if not math.isnan(amt60.iloc[t]) else 0.0
 
-    t = len(df) - 1
-    # --- 趋势 ---
-    cond_trend = (
-        (ma5.iloc[t] > ma13.iloc[t])
-        and (ma13.iloc[t] > ma39.iloc[t])
-        and (ma13.iloc[t] > ma13.iloc[t - 1])
-        and (close.iloc[t] > ma13.iloc[t])
+    if meta.float_shares and meta.float_shares > 0:
+        turnover_d = float(vol.iloc[t]) / meta.float_shares
+        turnover60_avg = (
+            vol.iloc[t - 59 : t + 1].mean() / meta.float_shares if t >= 59 else math.nan
+        )
+    else:
+        turnover_d = math.nan
+        turnover60_avg = math.nan
+
+    def f1() -> bool:
+        if amt60_last < 5_000_000:
+            return False
+        if not math.isnan(turnover60_avg) and turnover60_avg < 0.008:
+            return False
+        if not math.isnan(turnover_d) and turnover_d < 0.006:
+            return False
+        return True
+
+    pass_f1 = f1()
+
+    # ===== F2: 价格 & 合规 =====
+    pass_f2 = (
+        3.0 <= last_close <= 50.0
+        and not meta.is_st
+        and not meta.is_delisting
+        and not meta.is_suspended
     )
 
-    # --- 量价 ---
-    max_high5 = high.iloc[t - 4 : t + 1].max()
-    cond_volume_price = (vol.iloc[t] >= 1.5 * vol_ma5.iloc[t]) and (
-        close.iloc[t] >= 0.98 * max_high5
+    # ===== F3: 多头趋势结构 =====
+    ma5_last = float(ma5.iloc[t]) if not math.isnan(ma5.iloc[t]) else math.nan
+    ma13_last = float(ma13.iloc[t]) if not math.isnan(ma13.iloc[t]) else math.nan
+    ma39_last = float(ma39.iloc[t]) if not math.isnan(ma39.iloc[t]) else math.nan
+    ma5_shift_5_last = (
+        float(ma5_shift_5.iloc[t]) if not math.isnan(ma5_shift_5.iloc[t]) else math.nan
     )
 
-    # --- 涨幅 ---
-    pct = (close.iloc[t] / close.iloc[t - 1] - 1) * 100.0
-    cond_pct = (pct >= 3.0) and (pct <= 6.0)
+    def f3() -> bool:
+        vals = [ma5_last, ma13_last, ma39_last, ma5_shift_5_last]
+        if any(math.isnan(v) for v in vals):
+            return False
+        if not (ma5_last >= ma13_last >= ma39_last):
+            return False
+        if not (last_close > ma13_last):
+            return False
+        if ma5_shift_5_last <= 0:
+            return False
+        return (ma5_last - ma5_shift_5_last) / ma5_shift_5_last >= 0.015
 
-    # --- 筹码近似 ---
-    vol_active10 = vol.iloc[t] / max(1e-9, vol_ma10.iloc[t])
-    std10 = stdev(close, 10).iloc[t]
-    std30 = stdev(close, 30).iloc[t]
-    std_ratio = (std10 / std30) if std30 and not math.isclose(std30, 0.0) else 9e9
-    pos80 = percentile(close.iloc[t - 29 : t + 1], 0.80)
-    cond_chips = (vol_active10 >= 1.2) and (std_ratio <= 0.8) and (close.iloc[t] >= pos80)
+    pass_f3 = f3()
 
-    # --- 连板 ≥3 剔除 ---
-    EPS = 0.002
-    lim = infer_limit_pct(meta.is_st, meta.market)
-    is_limit = (close.pct_change() >= (lim - EPS)).astype(int)
-    streak = 0
-    for k in range(t, max(-1, t - 10), -1):
-        if is_limit.iloc[k] == 1:
-            streak += 1
-        else:
-            break
-    cond_limit = streak < 3
+    # ===== F4: 放量确认（仅用自身20日均量；横截面分位在 export_universe） =====
+    vol_ma20 = ma(vol, 20)
+    if not math.isnan(vol_ma20.iloc[t]) and vol_ma20.iloc[t] > 0:
+        vol_ratio20 = float(vol.iloc[t]) / float(vol_ma20.iloc[t])
+    else:
+        vol_ratio20 = 0.0
+    price_ok = last_close >= prev_close
+    pass_f4 = (vol_ratio20 >= 1.2) and price_ok
 
-    # --- 弱转强 ---
-    cond_wts = max(open_.iloc[t], close.iloc[t]) > max(open_.iloc[t - 1], close.iloc[t - 1])
-
-    all_ok = (
-        cond_trend and cond_volume_price and cond_pct and cond_chips and cond_limit and cond_wts
-    )
-    if not all_ok:
+    all_core = pass_f1 and pass_f2 and pass_f3 and pass_f4
+    if not all_core:
         return {}
 
-    # --- 评分（排序用）---
-    trend_score = 1.0
-    vp_score = 0.5 * clamp(vol.iloc[t] / (1.5 * vol_ma5.iloc[t])) + 0.5 * clamp(
-        close.iloc[t] / (0.98 * max_high5)
+    # 简单打分用于排序（强动能 + 强流动性）
+    if t >= 20 and close.iloc[t - 20] > 0:
+        rs20 = float(last_close / close.iloc[t - 20] - 1.0)
+    else:
+        rs20 = 0.0
+    score = 0.5 * (rs20 + 1.0) + 0.3 * min(amt60_last / 50_000_000.0, 1.0) + 0.2 * min(
+        vol_ratio20 / 2.0, 1.0
     )
-    chips_score = (
-        0.34 * clamp(vol_active10 / 1.2)
-        + 0.33 * clamp(0.8 / max(1e-9, std_ratio))
-        + 0.33
-        * clamp(
-            (close.iloc[t] - close.iloc[t - 29 : t + 1].min())
-            / max(1e-9, close.iloc[t - 29 : t + 1].max() - close.iloc[t - 29 : t + 1].min())
-        )
-    )
-    score = 0.4 * trend_score + 0.35 * vp_score + 0.25 * chips_score
     score = round(float(score), 4)
 
-    reasons = []
-    reasons.append("趋势：MA5>MA13>MA39 且 MA13 上拐，收盘站上MA13")
-    reasons.append("量价：量能≥5日1.5倍，收盘接近5日高")
-    reasons.append(f"涨幅：{pct:.1f}%，动能健康")
-    reasons.append("筹码：活跃度↑、波动收敛、位于近30日上侧区间")
-    reasons.append("结构：今日实体区间上移（弱转强）")
+    reasons = [
+        "强流动性：60日均额≥500万，换手结构健康",
+        "价格/合规：3~50元，非 ST/退市/停牌",
+        "多头趋势：MA5≥MA13≥MA39，收盘站上 MA13，短期均线上拱",
+        "放量确认：相对20日均量放大，且价格不弱于前一日",
+    ]
+
+    checks: Dict[str, Any] = {
+        "pass_f1_liquidity_v2": pass_f1,
+        "pass_f2_price_compliance": pass_f2,
+        "pass_f3_trend": pass_f3,
+        "pass_f4_volume_confirm": pass_f4,
+        "amt60_avg": round(amt60_last, 2),
+        "turnover_d": round(turnover_d, 6) if not math.isnan(turnover_d) else None,
+        "turnover60_avg": round(turnover60_avg, 6)
+        if not math.isnan(turnover60_avg)
+        else None,
+        "vol_ratio20": round(vol_ratio20, 3),
+        "rs20": round(rs20, 4),
+    }
 
     return {
         "score": score,
-        "checks": {
-            "trend": {"pass": True},
-            "volume_price": {
-                "pass": True,
-                "volume_mult": round(float(vol.iloc[t] / max(1e-9, vol_ma5.iloc[t])), 3),
-                "high_5d": round(float(max_high5), 4),
-                "close_ratio_to_high5": round(float(close.iloc[t] / max_high5), 4),
-            },
-            "chips": {
-                "pass": True,
-                "vol_active10": round(float(vol_active10), 3),
-                "std10": round(float(std10), 6) if not pd.isna(std10) else None,
-                "std30": round(float(std30), 6) if not pd.isna(std30) else None,
-                "std_ratio": round(float(std_ratio), 6) if not pd.isna(std_ratio) else None,
-                "position30": round(
-                    float(
-                        (close.iloc[t] - close.iloc[t - 29 : t + 1].min())
-                        / max(
-                            1e-9,
-                            close.iloc[t - 29 : t + 1].max() - close.iloc[t - 29 : t + 1].min(),
-                        )
-                    ),
-                    3,
-                ),
-            },
-            "pct_change": round(float(pct), 3),
-            "limit_streak": streak,
-            "weak_to_strong": True,
-        },
+        "checks": checks,
         "reasons": reasons,
     }
 

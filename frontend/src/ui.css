@@ -84,6 +84,17 @@ a:hover{text-decoration:underline}
   font-size:var(--fz-xxs);color:#6b7280;margin-top:2px;
 }
 
+/* 已读但未选中的股票：淡橘色背景，弱一点的提示 */
+.list-item.viewed {
+  background-color: #fff7ed; /* Tailwind 的 orange-50 */
+}
+
+.list-item.viewed:hover {
+  background-color: #ffedd5; /* orange-100 */
+}
+
+
+
 /* —— 右侧 K 线区域 —— */
 .kline-wrap{padding:12px}
 .kline-card{

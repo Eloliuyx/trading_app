@@ -1,26 +1,252 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>推荐逻辑（v0.3）</title>
-    <style>
-      body { font: 16px/1.6 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,"Noto Sans SC","PingFang SC","Microsoft Yahei",sans-serif; margin: 24px; }
-      pre { white-space: pre-wrap; }
-    </style>
-  </head>
-  <body>
-    <pre id="md">系统依据 **趋势、量价、筹码、结构确认、风险控制** 五维规则，自动筛选“接近主升浪买点”的股票：
+<head>
+  <meta charset="UTF-8" />
+  <title>日线多因子趋势过滤器｜规则解释 F1–F9</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, -system-ui, sans-serif;
+      margin: 0;
+      padding: 24px 20px 40px;
+      background-color: #f9fafb;
+      color: #111827;
+      line-height: 1.7;
+    }
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 18px;
+      padding: 24px 24px 28px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+      border: 1px solid #e5e7eb;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 16px;
+    }
+    h2 {
+      margin-top: 20px;
+      margin-bottom: 4px;
+      font-size: 17px;
+      font-weight: 600;
+      color: #111827;
+    }
+    h3 {
+      margin: 10px 0 2px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+    }
+    p {
+      margin: 3px 0 6px;
+      font-size: 13px;
+      color: #374151;
+    }
+    code {
+      font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      background: #f3f4f6;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .tag {
+      display: inline-flex;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      border: 1px solid #e5e7eb;
+      margin-left: 6px;
+      color: #6b7280;
+    }
+    ul {
+      margin: 4px 0 6px 18px;
+      padding: 0;
+      font-size: 13px;
+      color: #374151;
+    }
+    .hint {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 14px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #eff6ff;
+      color: #2563eb;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      margin-left: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>日线多因子趋势过滤器 · 规则解释（F1–F9）</h1>
+    <div class="subtitle">
+      本页面说明前端「日线多因子趋势过滤器」中 F1–F9 的含义及实现口径，方便你从业务和代码两个角度理解与复盘。
+      <span class="pill">说明</span> 当前版本以 <code>public/out/universe.json</code> 为准。
+    </div>
 
-        1. **趋势方向**：MA5>MA13>MA39，MA13 向上拐，收盘价站上 MA13；
-        2. **量价确认**：当日成交量 ≥ 5 日均量的 1.5 倍，且收盘价 ≥ 近 5 日最高价的 98%（突破前沿）；
-        3. **涨幅过滤**：日涨幅介于 3%–6%，动能健康不过热；
-        4. **筹码结构（近似）**：近 10 日活跃度提升、波动收敛，价格处于近 30 日上侧区间；
-        5. **风险控制（自动）**：连板 ≥ 3 日直接剔除；
-        6. **结构确认（弱转强）**：今日实体区间上移（max(Open,Close) 大于昨日），确认多头再次主导。
+    <p>
+      系统整体思路：<strong>后端</strong>每天生成 <code>universe.json</code>，预计算好各类打分与布尔标签；
+      <strong>前端</strong>只做「可视化 + 组合过滤」，不再强制锁定任何「核心推荐池」。
+      F1–F9 都是可选项：<strong>勾选 = 启用该条件；不勾选 = 不限制。</strong>
+    </p>
 
-        满足以上条件即进入推荐列表，系统按贴近度打分排序。
-        **提示**：盘中“炸板”、极端乖离等仍需人工复核。
-        </pre>
-  </body>
+    <!-- F1 -->
+    <h2>F1 剔除 ST / 高风险个股<span class="tag">F1</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      过滤掉明显不适合作为趋势交易标的的股票，例如 ST、*ST、长期停牌、面值退市风险等。
+      目的：保证整个标的池的「标的质量」，避免技术面信号被壳股、雷股污染。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>后端在 <code>features</code> 中给出 <code>f_exclude_st: true/false</code>。</li>
+      <li>前端在 <code>universe.json</code> 载入时拍扁：<code>{ ...item, ...(features || {}) }</code>。</li>
+      <li>当勾选 F1 时：仅保留 <code>stock.f_exclude_st === true</code>（如字段缺失则视为通过）。</li>
+    </ul>
+
+    <!-- F2 -->
+    <h2>F2 强流动性<span class="tag">F2</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      要求标的具备稳定成交额，确保进出场可执行，不被「纸面信号」误导。
+      一般基于近 N 日成交额均值筛选。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>后端提供 <code>f_liquid_strong</code> 或基础字段 <code>amt60_avg</code>。</li>
+      <li>当前前端逻辑：优先使用 <code>f_liquid_strong</code>；若无，则以 <code>amt60_avg</code> 是否大于一定阈值判定（可在代码中调整）。</li>
+      <li>勾选 F2 时：<code>f_liquid_strong === true</code> 或满足阈值。</li>
+    </ul>
+
+    <!-- F3 -->
+    <h2>F3 合理价格区间<span class="tag">F3</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      限制在适合趋势交易的价格带，规避过低（流动性/预期问题）或过高（波动巨大、资金门槛高）的极端标的。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>后端可直接给 <code>f_price_floor</code>。</li>
+      <li>当前前端兜底逻辑：若无显式布尔值，则使用 <code>close</code> 在 [3, 80] 区间的标的视为通过。</li>
+      <li>勾选 F3 时：<code>f_price_floor === true</code> 或落在配置区间内。</li>
+    </ul>
+
+    <!-- F4 -->
+    <h2>F4 高成交额<span class="tag">F4</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      强调「有量的趋势」，避免在冷门股上画线。典型口径：当日或近几日成交额达到一定规模。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>依赖字段如 <code>amount_t</code>（当日成交额）、<code>amt5_avg</code> 等。</li>
+      <li>前端当前示例：当日成交额或近短期均额 &gt;= 配置阈值视为通过（字段缺失则不限制）。</li>
+    </ul>
+
+    <!-- F5 -->
+    <h2>F5 放量确认<span class="tag">F5</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      趋势启动或延续应伴随「相对放量」，用成交量相对均量的比例做确认，避免无量上涨的虚弱趋势。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>依赖 <code>vr</code> 或 <code>vol_ratioXX</code> 等放量比例指标。</li>
+      <li>勾选 F5 时：当日成交量 / 均量 ≥ 设定阈值（例如 1.2+）。</li>
+    </ul>
+
+    <!-- F6 -->
+    <h2>F6 行业相对强<span class="tag">F6</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      优先在「相对强势行业」里选股：个股背后至少不是拖后腿的行业，甚至是景气赛道。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>依赖如 <code>industry_rs20</code>、<code>industry_rank</code> 等行业相对强度/排名字段。</li>
+      <li>勾选 F6 时：仅保留位于前若干分位/排名的行业（具体阈值可在代码中调整）。</li>
+    </ul>
+
+    <!-- F7 -->
+    <h2>F7 强势行业 / 主题<span class="tag">F7</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      将「主题/板块」信号纳入，集中火力在市场主线，而不是在弱势板块里挖趋势。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>依赖后端对板块/主题打的强度标签，如 <code>f_strong_industry</code>、主题得分等。</li>
+      <li>当前前端默认逻辑保守，可根据后端输出完善为「勾选 F7 仅保留强势行业/主题标的」。</li>
+    </ul>
+
+    <!-- F8 -->
+    <h2>F8 多头均线结构<span class="tag">F8</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      要求价格处在相对健康的多头结构中，例如短期均线在上、长期在下，价格不破关键中长期均线。
+      本质是「顺势」。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>后端可给出布尔值 <code>f_bull_ma</code>，或提供 <code>ma5/ma13/ma39...</code>。</li>
+      <li>勾选 F8 时：优先使用 <code>f_bull_ma === true</code>；若无，则可约定
+        <code>ma5 &gt; ma13 &gt; ma39</code> 且 <code>close &gt; ma13</code> 等条件。
+      </li>
+    </ul>
+
+    <!-- F9 -->
+    <h2>F9 突破 / 趋势强化<span class="tag">F9</span></h2>
+    <h3>业务含义</h3>
+    <p>
+      捕捉「已经走出来」或「正在加速」的票：
+      突破阶段高点、箱体上沿、关键均线，或趋势强度指标显著提升。
+    </p>
+    <h3>实现口径 / 代码逻辑</h3>
+    <ul>
+      <li>依赖 <code>f_breakout</code>、<code>trend_breakout</code>、近 N 日新高、RS 突破等信号。</li>
+      <li>勾选 F9 时：仅保留被判定为「突破/强化」的标的。</li>
+    </ul>
+
+    <h2>前端如何使用这些规则？</h2>
+    <p>
+      在前端，我们做了三件事：
+    </p>
+    <ul>
+      <li>
+        载入 <code>universe.json</code> 后，将每条记录的 <code>features</code> 拍扁到顶层，
+        统一通过 <code>StockItem</code> 使用。
+      </li>
+      <li>
+        定义 <code>FACTOR_CONFIG</code>（见 <code>src/store.ts</code>）：
+        为每个 F 配置 <code>key / label / test(stock)</code>，前端过滤完全基于这些纯函数，
+        无「隐藏锁池」。
+      </li>
+      <li>
+        FilterPanel 勾选 → 更新 <code>filter.Fx</code> → ResultList 在
+        <code>matchFactors</code> 中依次调用对应 <code>test</code>，仅对勾选的 F 生效；
+        字段缺失默认「放行」，避免误杀。
+      </li>
+    </ul>
+
+    <p class="hint">
+      注：本页为静态说明文档，实际阈值与口径以你部署环境中的后端配置为准。
+      如需调整，只要同时更新后端导出的字段和 <code>FACTOR_CONFIG</code> 中对应的 <code>test</code> 即可。
+    </p>
+  </div>
+</body>
 </html>

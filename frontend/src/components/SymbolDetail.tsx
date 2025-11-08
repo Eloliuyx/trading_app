@@ -1,274 +1,264 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useDataStore, type PriceLine, type Note } from "../store";
-import KLineChart from "./KLineChart";
+// src/components/SymbolDetail.tsx
+import React, { useMemo, useState } from "react";
+import {
+  useDataStore,
+  FACTOR_CONFIG,
+  type StockItem,
+} from "../store";
 
-/** 读取 CSV（public/data/{symbol}.csv） */
-async function fetchCsv(symbol: string): Promise<string> {
-  const p = `/data/${symbol}.csv`;
-  const res = await fetch(p, { cache: "no-cache" });
-  if (!res.ok) throw new Error(`HTTP ${res.status} @ ${p}`);
-  return await res.text();
-}
-
-type Row = {
-  Date: string;
-  Open: number;
-  High: number;
-  Low: number;
-  Close: number;
-  Volume: number;
+const container: React.CSSProperties = {
+  padding: "10px 12px",
+  borderTop: "1px solid #e5e7eb",
+  background: "#ffffff",
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
 };
 
-/** 兼容无 Volume；修正换行解析 */
-function parseCsv(txt: string): Row[] {
-  if (!txt.trim()) return [];
-  const lines = txt.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
-  const headers = lines[0].split(",");
-  const idx = (k: string) => headers.indexOf(k);
-  const iD = idx("Date"),
-    iO = idx("Open"),
-    iH = idx("High"),
-    iL = idx("Low"),
-    iC = idx("Close"),
-    iV = idx("Volume");
-  if (iD < 0 || iO < 0 || iH < 0 || iL < 0 || iC < 0) return [];
-  return lines.slice(1).map((ln) => {
-    const a = ln.split(",");
-    return {
-      Date: a[iD],
-      Open: Number(a[iO]),
-      High: Number(a[iH]),
-      Low: Number(a[iL]),
-      Close: Number(a[iC]),
-      Volume: iV >= 0 ? Number(a[iV]) : 0,
-    };
-  });
+const title: React.CSSProperties = {
+  fontSize: 16,
+  fontWeight: 600,
+  color: "#111827",
+};
+
+const subtitle: React.CSSProperties = {
+  fontSize: 11,
+  color: "#6b7280",
+};
+
+const tagRow: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const tagBase: React.CSSProperties = {
+  padding: "2px 6px",
+  borderRadius: 999,
+  fontSize: 10,
+  border: "1px solid #e5e7eb",
+};
+
+const tagPass: React.CSSProperties = {
+  ...tagBase,
+  color: "#047857",
+  borderColor: "#bbf7d0",
+  background: "#ecfdf5",
+};
+
+const tagFail: React.CSSProperties = {
+  ...tagBase,
+  color: "#6b7280",
+  background: "#f9fafb",
+};
+
+const secTitle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#111827",
+  marginTop: 4,
+};
+
+const reason: React.CSSProperties = {
+  fontSize: 11,
+  color: "#4b5563",
+  lineHeight: 1.5,
+};
+
+const noteInput: React.CSSProperties = {
+  width: "100%",
+  minHeight: 40,
+  padding: "4px 6px",
+  fontSize: 11,
+  borderRadius: 4,
+  border: "1px solid #e5e7eb",
+  resize: "vertical",
+};
+
+const noteItem: React.CSSProperties = {
+  padding: "4px 6px",
+  background: "#f9fafb",
+  borderRadius: 4,
+  fontSize: 10,
+  color: "#4b5563",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 6,
+};
+
+function findStock(stocks: StockItem[], symbol: string | null): StockItem | null {
+  if (!symbol) return null;
+  return stocks.find((s) => s.symbol === symbol) || null;
 }
 
-export default function SymbolDetail() {
-  const selected = useDataStore((s) => s.selectedSymbol);
-  const stocks = useDataStore((s) => s.stocks);
+const SymbolDetail: React.FC = () => {
+  const {
+    stocks,
+    selectedSymbol,
+    market,
+    getNotes,
+    addNote,
+    deleteNote,
+  } = useDataStore((s) => ({
+    stocks: s.stocks,
+    selectedSymbol: s.selectedSymbol,
+    market: s.market,
+    getNotes: s.getNotes,
+    addNote: s.addNote,
+    deleteNote: s.deleteNote,
+  }));
 
-  // 水平线 API
-  const getLines = useDataStore((s) => s.getLines);
-  const addLine = useDataStore((s) => s.addLine);
-  const replaceLines = useDataStore((s) => s.replaceLines);
-
-  // 笔记 API
-  const getNotes = useDataStore((s) => s.getNotes);
-  const addNote = useDataStore((s) => s.addNote);
-  const deleteNote = useDataStore((s) => s.deleteNote);
-
-  const stock = useMemo(
-    () => stocks.find((x) => x.symbol === selected),
-    [stocks, selected]
+  const item = useMemo(
+    () => findStock(stocks, selectedSymbol),
+    [stocks, selectedSymbol]
   );
 
-  const [kdata, setKdata] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lines, setLines] = useState<PriceLine[]>([]);
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteText, setNoteText] = useState("");
 
-  /** 加载 CSV + 本地 lines/notes */
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!selected) return;
-      try {
-        setLoading(true);
-        const txt = await fetchCsv(selected);
-        if (!mounted) return;
-        const rows = parseCsv(txt);
-        const data = rows.map((r) => ({
-          time: r.Date,
-          open: r.Open,
-          high: r.High,
-          low: r.Low,
-          close: r.Close,
-        }));
-        setKdata(data);
-      } catch (e) {
-        console.warn("failed to fetch csv for", selected, e);
-        setKdata([]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-      // 本地线/笔记
-      setLines(getLines(selected));
-      setNotes(getNotes(selected));
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [selected, getLines, getNotes]);
-
-  /** 唯一“昨收线”：存在则更新价格，不新增重复 */
-  const addYesterdayClose = () => {
-    if (!selected || !kdata.length) return;
-    const last = kdata[kdata.length - 1];
-    const price = Number(last.close);
-    const cur = getLines(selected);
-    const others = cur.filter((l) => l.title !== "昨收");
-    const existing = cur.find((l) => l.title === "昨收");
-    const id = existing?.id ?? `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const next = [...others, { id, price, title: "昨收" }];
-    replaceLines(selected, next);
-    setLines(getLines(selected));
-  };
-
-  /** 点击图面新增一条价格线：标题直接用价格（显示更直观） */
-  const handleAddLineFromClick = (price: number) => {
-    if (!selected) return;
-    const title = price.toFixed(2);
-    addLine(selected, price, title);
-    setLines(getLines(selected));
-  };
-
-  if (!stock) {
+  if (!item) {
     return (
-      <div className="h-full flex items-center justify-center text-gray-500">
-        请选择左侧任意个股查看详情
+      <div style={container}>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>
+          左侧选择一只股票，查看多因子结果与个人备注。
+        </div>
       </div>
     );
   }
 
+  const asof =
+    item.last_date ||
+    market?.last_bar_date ||
+    market?.asof ||
+    "";
+
+  const notes = getNotes(item.symbol);
+
+  const handleAddNote = () => {
+    if (!noteText.trim()) return;
+    addNote(item.symbol, noteText);
+    setNoteText("");
+  };
+
   return (
-    <div
-    className="h-full flex flex-col bg-white"
-    style={{
-      paddingLeft: "24px",   // ← 增加左侧留白
-      paddingRight: "24px",  // ← 增加右侧留白（保持对称）
-      paddingTop: "24px",
-    }}
-  >
-{/* 头部：一行紧凑展示 */}
-<div className="px-4 py-2 border-b bg-white">
-  <div style={{fontSize:"15px", fontWeight:700, letterSpacing:"-.01em", color:"#0f172a"}}>
-    {stock.name}
-    <span className="ml-2" style={{fontSize:"12px", color:"#64748b", fontWeight:500}}>
-      &nbsp;&nbsp;{stock.symbol}{stock.industry ? ` · ${stock.industry}` : ""}
-    </span>
-  </div>
-</div>
+    <div style={container}>
+      <div style={title}>
+        {item.symbol} {item.name}
+      </div>
+      <div style={subtitle}>
+        {item.industry ? `${item.industry}｜` : ""}
+        {item.market || ""}
+        {item.is_st && "｜ST"}
+        {asof && ` ｜ 数据截至：${asof}`}
+      </div>
 
-
-      {/* 图表卡片 */}
-      <div className="kline-wrap flex-1 overflow-auto">
-        {loading ? (
-          <div className="p-3 text-sm text-gray-500">加载 K 线…</div>
-        ) : kdata.length === 0 ? (
-          <div className="p-3 text-sm text-gray-500">暂无 K 线数据</div>
-        ) : (
-          <div className="card kline-card">
-            <KLineChart
-              className="kline-host"
-              data={kdata as any}
-              priceLines={lines}
-              onAddLineFromClick={handleAddLineFromClick}
-            />
-          </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        {typeof item.score === "number" && (
+          <span style={{ fontSize: 11, color: "#2563eb" }}>
+            综合评分 {Math.round(item.score)}
+          </span>
+        )}
+        {item.bucket && (
+          <span style={{ fontSize: 11, color: "#059669" }}>
+            {item.bucket}
+          </span>
         )}
       </div>
 
-      {/* 工具按钮条 */}
-{/* 辅助按钮 */}
-<div className="border-t bg-white" style={{ padding: "10px 16px", marginTop: 4 }}>
-  <div className="toolbar" style={{ gap: 10 }}>
-    <button className="btn btn--sm btn--primary" onClick={addYesterdayClose}>
-      加昨收线
-    </button>
-    <button
-      className="btn btn--sm btn--ghost"
-      onClick={() => {
-        if (!selected) return;
-        replaceLines(selected, []);
-        setLines([]);
-      }}
-    >
-      清空水平线
-    </button>
-  </div>
-</div>
+      <div style={secTitle}>多因子规则通过情况</div>
+      <div style={tagRow}>
+        {FACTOR_CONFIG.map((f) => {
+          const pass = f.test(item);
+          const style = pass ? tagPass : tagFail;
+          const prefix = pass ? "✅" : "·";
+          return (
+            <span key={f.key} style={style}>
+              {prefix} {f.label}
+            </span>
+          );
+        })}
+      </div>
 
+      {Array.isArray(item.reasons) && item.reasons.length > 0 && (
+        <>
+          <div style={secTitle}>机器解读 / 备注</div>
+          <div>
+            {item.reasons.map((r, i) => (
+              <div key={i} style={reason}>
+                • {r}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* 笔记区 */}
-      <div className="notes border-t">
-        <NotesPanel
-          symbol={stock.symbol}
-          notes={notes}
-          onAdd={(text) => {
-            addNote(stock.symbol, text);
-            setNotes(getNotes(stock.symbol));
-          }}
-          onDelete={(id) => {
-            deleteNote(stock.symbol, id);
-            setNotes(getNotes(stock.symbol));
+      {/* 个股记笔记 */}
+      <div style={secTitle}>我的笔记</div>
+      <div>
+        <textarea
+          style={noteInput}
+          placeholder="记录你对这个标的的逻辑、买卖计划..."
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.metaKey && e.key === "Enter") {
+              e.preventDefault();
+              handleAddNote();
+            }
           }}
         />
+        <div style={{ marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+          <button
+            style={{
+              padding: "2px 8px",
+              fontSize: 10,
+              borderRadius: 4,
+              border: "1px solid #d1d5db",
+              background: "#111827",
+              color: "#f9fafb",
+              cursor: "pointer",
+            }}
+            onClick={handleAddNote}
+          >
+            保存笔记
+          </button>
+          <div
+            style={{
+              fontSize: 9,
+              color: "#9ca3af",
+              alignSelf: "center",
+            }}
+          >
+            笔记仅保存在本机（localStorage）
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+        {notes.map((n) => (
+          <div key={n.id} style={noteItem}>
+            <div>
+              <div>{n.text}</div>
+              <div style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}>
+                {new Date(n.ts).toLocaleString()}
+              </div>
+            </div>
+            <button
+              onClick={() => deleteNote(item.symbol, n.id)}
+              style={{
+                border: "none",
+                background: "transparent",
+                fontSize: 10,
+                color: "#9ca3af",
+                cursor: "pointer",
+              }}
+            >
+              删除
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
-}
+};
 
-/* ============== 笔记组件 ============== */
-function NotesPanel({
-  symbol,
-  notes,
-  onAdd,
-  onDelete,
-}: {
-  symbol: string;
-  notes: Note[];
-  onAdd: (text: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [text, setText] = useState("");
-
-  return (
-    <div>
-      <h4 className="text-sm text-gray-500 mb-2">我的笔记（{symbol}）</h4>
-      <div className="flex gap-2 mb-2">
-  <input
-    className="flex-1 border rounded px-2 py-1 text-sm"
-    placeholder="写点什么…"
-    value={text}
-    onChange={(e) => setText(e.target.value)}
-  />
-  <button
-    className="btn btn--sm btn--primary"
-    onClick={() => {
-      if (!text.trim()) return;
-      onAdd(text.trim());
-      setText("");
-    }}
-  >
-    添加
-  </button>
-</div>
-
-      {notes.length === 0 ? (
-        <div className="text-xs text-gray-500">
-
-        </div>
-      ) : (
-        <ul>
-          {notes.map((n) => (
-            <li key={n.id} className="row">
-              <div>
-                <div className="date">{n.date}</div>
-                <div>{n.text}</div>
-              </div>
-              <button
-  className="btn btn--xs btn--danger"
-  onClick={() => onDelete(n.id)}
-  title="删除"
->
-  删除
-</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+export default SymbolDetail;

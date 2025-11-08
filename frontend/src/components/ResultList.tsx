@@ -1,83 +1,238 @@
-import React, { useMemo } from "react";
-import { useDataStore } from "../store";
+// src/components/ResultList.tsx
+import React, {
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  KeyboardEvent,
+} from "react";
+import {
+  useDataStore,
+  FACTOR_CONFIG,
+  type StockItem,
+  type FKey,
+} from "../store";
 
-type FKeys =
-  | "f_exclude_st" | "f_liquid_strong" | "f_price_floor"
-  | "f_high_amt" | "f_high_vr" | "f_ind_rank_top5"
-  | "f_strong_industry" | "f_bull_ma";
+const containerStyle: React.CSSProperties = {
+  flex: "0 0 340px",
+  display: "flex",
+  flexDirection: "column",
+  borderRight: "1px solid #e5e7eb",
+  background: "#ffffff",
+  overflow: "hidden",
+};
 
-function activeFlags(filter: any): FKeys[] {
-  const all: FKeys[] = [
-    "f_exclude_st","f_liquid_strong","f_price_floor",
-    "f_high_amt","f_high_vr","f_ind_rank_top5",
-    "f_strong_industry","f_bull_ma",
-  ];
-  if (!filter) return [];
-  return all.filter((k) => !!filter[k]);
+const headerStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderBottom: "1px solid #e5e7eb",
+  fontSize: 11,
+  color: "#6b7280",
+  display: "flex",
+  justifyContent: "space-between",
+};
+
+const listStyle: React.CSSProperties = {
+  flex: 1,
+  overflowY: "auto",
+};
+
+const itemBase: React.CSSProperties = {
+  padding: "6px 10px",
+  borderBottom: "1px solid #f3f4f6",
+  cursor: "pointer",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+const itemSelected: React.CSSProperties = {
+  ...itemBase,
+  background: "#eff6ff",
+};
+
+// ✅ 已读颜色改成浅橘色，比较醒目
+const itemRead: React.CSSProperties = {
+  ...itemBase,
+  background: "#fff7ed", // tailwind 的 orange-50 类似
+};
+
+const titleStyle: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#111827",
+};
+
+const subtitleStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: "#6b7280",
+};
+
+const infoRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  fontSize: 10,
+};
+
+const scoreStyle: React.CSSProperties = { color: "#2563eb" };
+const bucketStyle: React.CSSProperties = { color: "#059669" };
+
+const FLAG_KEYS: FKey[] = FACTOR_CONFIG.map((f) => f.key);
+
+function matchSearch(stock: StockItem, q: string): boolean {
+  const text = q.trim();
+  if (!text) return true;
+  const t = text.toLowerCase();
+  return (
+    stock.symbol.toLowerCase().includes(t) ||
+    (stock.name || "").toLowerCase().includes(t)
+  );
 }
 
-function passByFlags(ft: any, flags: FKeys[]): boolean {
-  if (!flags.length) return true;
-  if (!ft) return false;
-  for (const k of flags) if (!ft[k]) return false;
+function matchFactors(stock: StockItem, filter: Record<FKey, boolean>): boolean {
+  for (const cfg of FACTOR_CONFIG) {
+    if (!filter[cfg.key]) continue;
+    if (!cfg.test(stock)) return false;
+  }
   return true;
 }
 
-export default function ResultList() {
-  const stocks = useDataStore((s) => s.stocks);
-  const filter: any = useDataStore((s) => s.filter as any);
-  const setSelected = useDataStore((s: any) => s.setSelectedSymbol ?? (() => {}));
-  const selected = useDataStore((s: any) => s.selectedSymbol ?? null);
+const ResultList: React.FC = () => {
+  const {
+    stocks,
+    filter,
+    selectedSymbol,
+    setSelectedSymbol,
+    market,
+  } = useDataStore((s) => ({
+    stocks: s.stocks,
+    filter: s.filter,
+    selectedSymbol: s.selectedSymbol,
+    setSelectedSymbol: s.setSelectedSymbol,
+    market: s.market,
+  }));
 
-  const flags = activeFlags(filter);
+  const [readMap, setReadMap] = useState<Record<string, string>>({});
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  const items = useMemo(() => {
-    const arr = (stocks ?? []).filter((s) => passByFlags(s.features, flags));
-    // 强度友好排序：先按 pct_rs20 再按 pct_amt
-    arr.sort((a, b) => {
-      const fa = a.features ?? {};
-      const fb = b.features ?? {};
-      const ar = Number(fa.pct_rs20 ?? -1);
-      const br = Number(fb.pct_rs20 ?? -1);
-      if (br !== ar) return br - ar;
-      const aa = Number(fa.pct_amt ?? -1);
-      const ba = Number(fb.pct_amt ?? -1);
-      if (ba !== aa) return ba - aa;
-      return (b.name ?? "").localeCompare(a.name ?? "");
-    });
-    return arr;
-  }, [stocks, flags]);
+  useEffect(() => {
+    setReadMap({});
+  }, [market?.last_bar_date, market?.asof]);
+
+  const visible = useMemo(() => {
+    if (!stocks?.length) return [];
+    const f = filter;
+    return stocks
+      .filter((s) => matchSearch(s, f.q))
+      .filter((s) => matchFactors(s, f as any));
+  }, [stocks, filter]);
+
+  const handleSelect = (item: StockItem) => {
+    setSelectedSymbol(item.symbol);
+    const dayKey = market?.last_bar_date || market?.asof || "na";
+    setReadMap((prev) => ({ ...prev, [item.symbol]: dayKey }));
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!visible.length) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+
+    const idx = visible.findIndex((s) => s.symbol === selectedSymbol);
+    let nextIdx = idx;
+
+    if (e.key === "ArrowDown") {
+      nextIdx = idx < 0 ? 0 : Math.min(visible.length - 1, idx + 1);
+    } else {
+      nextIdx = idx <= 0 ? 0 : idx - 1;
+    }
+
+    const next = visible[nextIdx];
+    if (!next) return;
+    handleSelect(next);
+
+    const container = listRef.current;
+    const el = container?.querySelector<HTMLDivElement>(
+      `[data-symbol="${next.symbol}"]`
+    );
+    if (container && el) {
+      const top = el.offsetTop;
+      const bottom = top + el.offsetHeight;
+      if (top < container.scrollTop) {
+        container.scrollTop = top - 8;
+      } else if (bottom > container.scrollTop + container.clientHeight) {
+        container.scrollTop = bottom - container.clientHeight + 8;
+      }
+    }
+  };
+
+  const status = market?.status;
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="list-head">命中：{items.length} 条</div>
-      <div className="list-scroll">
-        {items.length === 0 ? (
-          <div className="p-3 text-sm text-gray-500">当前条件下没有结果，试着取消一些勾选。</div>
-        ) : (
-          items.map((s) => {
-            const active = selected === s.symbol;
-            return (
-              <button
-                key={s.symbol}
-                className={`list-item ${active ? "selected" : ""}`}
-                onClick={() => {
-                  (useDataStore as any).setState?.({ selectedSymbol: s.symbol });
-                  setSelected?.(s.symbol);
-                }}
-              >
-<div className="list-title">
-  {s.name}
-  <span className="ml-2" style={{ fontWeight: 500, fontSize: "12px", color: "#64748b" }}>
-    &nbsp;&nbsp;{s.symbol}{s.industry ? ` · ${s.industry}` : ""}
-  </span>
-</div>
-                {/* 不再显示“强流动性”等标签，保持简洁 */}
-              </button>
-            );
-          })
+    <div style={containerStyle} tabIndex={0} onKeyDown={onKeyDown}>
+      <div style={headerStyle}>
+        <span>结果 {visible.length} 条</span>
+        <span>
+          {status === "ERROR" && "数据加载失败"}
+          {status === "NO_DATA" && "无数据"}
+          {status === "OK" && "来自 universe.json"}
+        </span>
+      </div>
+
+      <div ref={listRef} style={listStyle}>
+        {visible.map((item) => {
+          const dayKey = market?.last_bar_date || market?.asof || "na";
+          const isRead = readMap[item.symbol] === dayKey;
+          const isSelected = item.symbol === selectedSymbol;
+          const style = isSelected
+            ? itemSelected
+            : isRead
+            ? itemRead
+            : itemBase;
+
+          return (
+            <div
+              key={item.symbol}
+              data-symbol={item.symbol}
+              style={style}
+              onClick={() => handleSelect(item)}
+            >
+              <div style={titleStyle}>
+                {item.symbol} {item.name}
+              </div>
+              <div style={subtitleStyle}>
+                {item.industry ? `${item.industry}｜` : ""}
+                {item.market || ""}
+                {item.is_st && "｜ST"}
+              </div>
+              <div style={infoRowStyle}>
+                {typeof item.score === "number" && (
+                  <span style={scoreStyle}>
+                    Score {Math.round(item.score)}
+                  </span>
+                )}
+                {item.bucket && (
+                  <span style={bucketStyle}>{item.bucket}</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {visible.length === 0 && (
+          <div
+            style={{
+              padding: 16,
+              fontSize: 12,
+              color: "#9ca3af",
+            }}
+          >
+            当前条件下暂无标的。
+            建议先取消全部 F，再逐个开启排查。
+          </div>
         )}
       </div>
     </div>
   );
-}
+};
+
+export default ResultList;

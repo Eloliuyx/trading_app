@@ -1,75 +1,92 @@
-import React, { useEffect } from "react";
-import { useDataStore } from "../store";
+// src/components/FilterPanel.tsx
+import React from "react";
+import { useDataStore, FACTOR_CONFIG } from "../store";
 
-type FKeys =
-  | "f_exclude_st"
-  | "f_liquid_strong"
-  | "f_price_floor"
-  | "f_high_amt"
-  | "f_high_vr"
-  | "f_ind_rank_top5"
-  | "f_strong_industry"
-  | "f_bull_ma";
+const wrapper: React.CSSProperties = {
+  padding: "8px 12px",
+  borderBottom: "1px solid #e5e7eb",
+  background: "#f9fafb",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
 
-const DEFAULT_ON: FKeys[] = ["f_exclude_st", "f_liquid_strong", "f_price_floor", "f_bull_ma"];
+const row: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 12,
+  alignItems: "center",
+};
 
-export default function FilterPanel() {
-  const filter: any = useDataStore((s) => s.filter as any);
-  const setFilter = useDataStore((s) => (s as any).setFilter as (p: any) => void);
+const label: React.CSSProperties = {
+  fontSize: 12,
+  color: "#6b7280",
+};
 
-  // 初始化默认勾选（仅在首次未设置时）
-  useEffect(() => {
-    const hasAnyF =
-      filter &&
-      Object.keys(filter).some((k) =>
-        ["f_exclude_st","f_liquid_strong","f_price_floor","f_high_amt","f_high_vr","f_ind_rank_top5","f_strong_industry","f_bull_ma"].includes(k)
-      );
-    if (!hasAnyF) {
-      const init: any = {};
-      DEFAULT_ON.forEach((k) => (init[k] = true));
-      setFilter(init);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+const input: React.CSSProperties = {
+  padding: "4px 8px",
+  fontSize: 12,
+  borderRadius: 4,
+  border: "1px solid #d1d5db",
+  outline: "none",
+  width: 180,
+};
 
-  const onToggle = (key: FKeys) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilter({ [key]: e.target.checked });
-  };
+const checkboxLabel: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  fontSize: 12,
+  color: "#111827",
+  cursor: "pointer",
+};
 
-  const checked = (k: FKeys) => !!filter?.[k];
+const FilterPanel: React.FC = () => {
+  const { filter, setFilter, toggleFlag } = useDataStore((s) => ({
+    filter: s.filter,
+    setFilter: s.setFilter,
+    toggleFlag: s.toggleFlag,
+  }));
 
   return (
-    <div className="filters">
-      <div className="font-medium mr-2">筛选：</div>
+    <div style={wrapper}>
+      <div style={row}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#111827",
+          }}
+        >
+          多因子过滤
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={label}>搜索</span>
+          <input
+            style={input}
+            placeholder="代码 / 名称关键字"
+            value={filter.q}
+            onChange={(e) => setFilter({ q: e.target.value })}
+          />
+        </div>
+      </div>
 
-      <label><input type="checkbox" checked={checked("f_liquid_strong")} onChange={onToggle("f_liquid_strong")} /> 强流动性</label>
-      <label><input type="checkbox" checked={checked("f_price_floor")} onChange={onToggle("f_price_floor")} /> 价格底线</label>
-      <label><input type="checkbox" checked={checked("f_exclude_st")} onChange={onToggle("f_exclude_st")} /> 剔除ST股</label>
-      <label><input type="checkbox" checked={checked("f_high_amt")} onChange={onToggle("f_high_amt")} /> 高成交额</label>
-      <label><input type="checkbox" checked={checked("f_high_vr")} onChange={onToggle("f_high_vr")} /> 高量能相对均量</label>
-      <label><input type="checkbox" checked={checked("f_ind_rank_top5")} onChange={onToggle("f_ind_rank_top5")} /> 高行业排名（Top5）</label>
-      <label><input type="checkbox" checked={checked("f_strong_industry")} onChange={onToggle("f_strong_industry")} /> 强势板块</label>
-      <label><input type="checkbox" checked={checked("f_bull_ma")} onChange={onToggle("f_bull_ma")} /> 多头结构</label>
-
-      <div className="ml-auto flex gap-2">
-  <button
-    className="btn btn--sm btn--muted"
-    onClick={() => {
-      const next: any = {};
-      DEFAULT_ON.forEach((k) => (next[k] = true));
-      setFilter(next);
-    }}
-  >
-    恢复默认
-  </button>
-  <button
-    className="btn btn--sm btn--ghost"
-    onClick={() => setFilter({})}
-  >
-    全部取消
-  </button>
-</div>
-
+      <div style={row}>
+        <span style={label}>规则选择：</span>
+        {FACTOR_CONFIG.map((f) => (
+          <label key={f.key} style={checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={!!filter[f.key]}
+              onChange={() => toggleFlag(f.key)}
+              style={{ width: 12, height: 12 }}
+            />
+            <span>{f.label}</span>
+          </label>
+        ))}
+      </div>
     </div>
   );
-}
+};
+
+export default FilterPanel;

@@ -1,248 +1,188 @@
 // src/components/KLineChart.tsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   createChart,
-  ColorType,
   LineStyle,
-  type DeepPartial,
-  type IChartApi,
-  type IPriceLine,
-  type ISeriesApi,
-  type CandlestickData,
-  type HistogramData,
-  type CandlestickSeriesPartialOptions,
-  type LineWidth,
+  IChartApi,
+  ISeriesApi,
+  MouseEventParams,
+  Time,
 } from "lightweight-charts";
+import {
+  useDataStore,
+  type PriceLine,
+  type KLineBar,
+} from "../store";
 
-export type Candle = CandlestickData & { time: string }; // YYYY-MM-DD
-export type VolBar = HistogramData<string>;
-export type PriceLineModel = { id: string; price: number; title?: string };
+/**
+ * 日K图：
+ * - 根据 selectedSymbol 展示 K 线
+ * - 点击图表：在点击 Y 坐标对应的价格处生成水平线（存入全局 store）
+ * - 为适配不同版本 lightweight-charts，我们在点击回调里使用 `as any`
+ */
 
-export type KLineChartProps = {
-  data: Candle[];
-  volume?: VolBar[];
-  priceLines?: PriceLineModel[];
-  onAddLineFromClick?: (price: number) => void;
-  onRegister?: (api: {
-    chart: IChartApi;
-    candle: ISeriesApi<"Candlestick">;
-    volume?: ISeriesApi<"Histogram">;
-    ma?: { ma5?: ISeriesApi<"Line">; ma13?: ISeriesApi<"Line">; ma39?: ISeriesApi<"Line"> };
-  }) => void;
-  showMA?: boolean;
-  showVolume?: boolean;
-  autoscale?: boolean;
-  className?: string;
+const containerStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
 };
 
-function sma(values: number[], period: number): (number | null)[] {
-  if (period <= 1) return values.map((v) => (Number.isFinite(v) ? v : null));
-  const res: (number | null)[] = new Array(values.length).fill(null);
-  let sum = 0;
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    sum += v;
-    if (i >= period) sum -= values[i - period];
-    if (i >= period - 1) res[i] = sum / period;
-  }
-  return res;
-}
-
-export default function KLineChart({
-  data,
-  volume,
-  priceLines = [],
-  onAddLineFromClick,
-  onRegister,
-  showMA = true,
-  showVolume = true,
-  autoscale = true,
-  className = "w-full h-full",
-}: KLineChartProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-
+const KLineChart: React.FC = () => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const maRefs = useRef<{ ma5?: ISeriesApi<"Line">; ma13?: ISeriesApi<"Line">; ma39?: ISeriesApi<"Line"> }>({});
-  const lineMapRef = useRef<Map<string, IPriceLine>>(new Map());
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const lineMapRef = useRef<Map<string, any>>(new Map());
+  const selectedSymbolRef = useRef<string | null>(null);
 
-  const maData = useMemo(() => {
-    if (!showMA || data.length === 0) return null;
-    const closes = data.map((d) => Number(d.close));
-    const t = data.map((d) => d.time);
-    const mk = (arr: (number | null)[]) =>
-      arr.map((v, i) => (v == null ? null : { time: t[i], value: Number(v) }));
-    return {
-      ma5: mk(sma(closes, 5)),
-      ma13: mk(sma(closes, 13)),
-      ma39: mk(sma(closes, 39)),
-    };
-  }, [data, showMA]);
+  const selectedSymbol = useDataStore((s) => s.selectedSymbol);
+  const klineMap = useDataStore((s) => s.klineMap);
+  const loadKline = useDataStore((s) => s.loadKline);
+  const getLines = useDataStore((s) => s.getLines);
+  const addLine = useDataStore((s) => s.addLine);
 
-  // init
+  /** 初始化图表和点击事件 */
   useEffect(() => {
-    if (!hostRef.current) return;
-    const container = hostRef.current;
+    if (!containerRef.current || chartRef.current) return;
 
-    const chart = createChart(container, {
-      layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#333" },
-      grid: { vertLines: { color: "#efefef" }, horzLines: { color: "#efefef" } },
-      rightPriceScale: { borderColor: "#ddd", entireTextOnly: false },
-      timeScale: { borderColor: "#ddd" }, // ✅ 去掉 tickMarkFormatter，避免隐式 any
-      crosshair: { mode: 0 },
-      watermark: { visible: false },
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { color: "#ffffff" },
+        textColor: "#6b7280",
+      },
+      rightPriceScale: { borderColor: "#e5e7eb" },
+      timeScale: { borderColor: "#e5e7eb", rightOffset: 2 },
+      grid: {
+        vertLines: { color: "#f3f4f6" },
+        horzLines: { color: "#f3f4f6" },
+      },
+      crosshair: { mode: 1 },
     });
 
-    const candle = chart.addCandlestickSeries({
-      upColor: "#26a69a",
-      borderUpColor: "#26a69a",
-      wickUpColor: "#26a69a",
-      downColor: "#ef5350",
-      borderDownColor: "#ef5350",
-      wickDownColor: "#ef5350",
-      priceLineVisible: false,
-    } as DeepPartial<CandlestickSeriesPartialOptions>);
+    const series = chart.addCandlestickSeries({
+      upColor: "#ef4444",
+      downColor: "#22c55e",
+      borderUpColor: "#ef4444",
+      borderDownColor: "#22c55e",
+      wickUpColor: "#ef4444",
+      wickDownColor: "#22c55e",
+    });
 
     chartRef.current = chart;
-    candleRef.current = candle;
+    seriesRef.current = series;
 
-    const ro = new ResizeObserver(() => {
-      chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-      if (autoscale) candle.priceScale().applyOptions({ autoScale: true });
-    });
-    ro.observe(container);
-
-    const clickHandler = (param: any) => {
-      if (!onAddLineFromClick || !param?.point || !candleRef.current) return;
-      const p = candleRef.current.coordinateToPrice(param.point.y);
-      if (typeof p === "number" && isFinite(p)) onAddLineFromClick(Number(p.toFixed(3)));
+    const handleResize = () => {
+      if (!containerRef.current || !chartRef.current) return;
+      const { clientWidth, clientHeight } = containerRef.current;
+      chartRef.current.applyOptions({
+        width: clientWidth,
+        height: clientHeight,
+      });
     };
-    chart.subscribeClick(clickHandler);
+    handleResize();
+    window.addEventListener("resize", handleResize);
 
-    onRegister?.({ chart, candle });
+    // 点击生成水平线：用像素 -> 价格，全部用 any 规避类型差异
+    const handleClick = (param: MouseEventParams<Time>) => {
+      const symbol = selectedSymbolRef.current;
+      if (!symbol || !seriesRef.current) return;
+
+      const anyParam = param as any;
+      const point = anyParam?.point;
+      if (!point) return;
+
+      const priceScale: any = (seriesRef.current as any).priceScale?.();
+      if (!priceScale || typeof priceScale.coordinateToPrice !== "function") {
+        // 某些极端版本没有该方法，就直接跳过，保证不报错
+        return;
+      }
+
+      const price = priceScale.coordinateToPrice(point.y);
+      if (price == null || !Number.isFinite(price)) return;
+
+      const line: PriceLine = {
+        id: `pl_${symbol}_${price.toFixed(2)}_${Date.now()}`,
+        price,
+        title: price.toFixed(2),
+      };
+      addLine(symbol, line);
+    };
+
+    chart.subscribeClick(handleClick);
 
     return () => {
-      chart.unsubscribeClick(clickHandler);
-      ro.disconnect();
+      window.removeEventListener("resize", handleResize);
+      chart.unsubscribeClick(handleClick);
       chart.remove();
       chartRef.current = null;
-      candleRef.current = null;
-      volRef.current = null;
+      seriesRef.current = null;
       lineMapRef.current.clear();
-      maRefs.current = {};
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [addLine]);
 
-  // set candles
+  /** 跟踪当前选中 symbol，懒加载 K 线 */
   useEffect(() => {
-    if (!candleRef.current) return;
-    candleRef.current.setData(data);
-    if (autoscale) chartRef.current?.timeScale().fitContent();
-  }, [data, autoscale]);
-
-  // volume pane
-  useEffect(() => {
-    if (!chartRef.current) return;
-    const chart = chartRef.current;
-
-    // 清旧
-    if (volRef.current) {
-      chart.removeSeries(volRef.current);
-      volRef.current = null;
+    selectedSymbolRef.current = selectedSymbol || null;
+    if (selectedSymbol) {
+      loadKline(selectedSymbol);
     }
-    if (!showVolume) return;
+  }, [selectedSymbol, loadKline]);
 
-    const volSeries = chart.addHistogramSeries({
-      priceFormat: { type: "volume" },
-      priceScaleId: "vol",
-      color: "#90a4ae",
-    });
-    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
-volSeries.applyOptions({ baseLineVisible: false });  // ✅
-
-    // ✅ 正确姿势：对该序列所属的价格轴设置 scaleMargins
-    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
-
-    const volData =
-      volume && volume.length ? volume : data.map((d) => ({ time: d.time, value: 0 }));
-    volSeries.setData(volData);
-
-    onRegister?.({ chart, candle: candleRef.current!, volume: volSeries, ma: maRefs.current });
-
-    return () => {
-      if (volRef.current) {
-        chart.removeSeries(volRef.current);
-        volRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVolume, volume, data]);
-
-  // MAs
+  /** 更新图表数据 & 水平线 */
   useEffect(() => {
-    if (!chartRef.current) return;
     const chart = chartRef.current;
-    const candle = candleRef.current!;
-    // 清旧
-    Object.values(maRefs.current).forEach((s) => s && chart.removeSeries(s));
-    maRefs.current = {};
+    const series = seriesRef.current;
+    if (!chart || !series) return;
 
-    if (!showMA || !maData) return;
-
-    const addMA = (
-      seriesData: ({ time: string; value: number } | null)[] | null,
-      width: number,
-      style: LineStyle
-    ) => {
-      if (!seriesData) return undefined;
-      const s = chart.addLineSeries({
-        color: "#546e7a",
-        lineWidth: (width as LineWidth), // ✅ lineWidth 需要 LineWidth 类型
-        lineStyle: style,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
+    if (!selectedSymbol) {
+      series.setData([]);
+      lineMapRef.current.forEach((pl) => {
+        try {
+          series.removePriceLine(pl);
+        } catch {}
       });
-      s.setData(seriesData.filter(Boolean) as { time: string; value: number }[]);
-      return s;
-    };
-
-    maRefs.current.ma5 = addMA(maData.ma5, 1, LineStyle.Solid);
-    maRefs.current.ma13 = addMA(maData.ma13, 1, LineStyle.Dotted);
-    maRefs.current.ma39 = addMA(maData.ma39, 1, LineStyle.Dashed);
-
-    onRegister?.({ chart, candle, volume: volRef.current ?? undefined, ma: maRefs.current });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showMA, maData]);
-
-  // controlled price lines
-  useEffect(() => {
-    const series = candleRef.current;
-    if (!series) return;
-
-    for (const [id, pl] of lineMapRef.current.entries()) {
-      if (!priceLines.find((l) => l.id === id)) {
-        series.removePriceLine(pl);
-        lineMapRef.current.delete(id);
-      }
+      lineMapRef.current.clear();
+      return;
     }
 
-    priceLines.forEach((l) => {
-      const prev = lineMapRef.current.get(l.id);
-      if (prev) series.removePriceLine(prev);
+    const bars: KLineBar[] = klineMap[selectedSymbol] || [];
+    if (!bars.length) {
+      series.setData([]);
+      return;
+    }
+
+    series.setData(bars as any);
+
+    const n = bars.length;
+    if (n > 80) {
+      const from = bars[n - 80].time as any;
+      const to = bars[n - 1].time as any;
+      chart.timeScale().setVisibleRange({ from, to });
+    } else {
+      chart.timeScale().fitContent();
+    }
+
+    // 清理旧线
+    lineMapRef.current.forEach((pl) => {
+      try {
+        series.removePriceLine(pl);
+      } catch {}
+    });
+    lineMapRef.current.clear();
+
+    // 绘制当前 symbol 的线
+    const lines = getLines(selectedSymbol) || [];
+    lines.forEach((l) => {
       const pl = series.createPriceLine({
         price: l.price,
-        color: "#9e9e9e",
-        lineWidth: 1 as LineWidth, // ✅
+        title: l.title,
+        color: "#6b7280",
+        lineWidth: 1,
         lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: l.title ?? "",
       });
       lineMapRef.current.set(l.id, pl);
     });
-  }, [priceLines]);
+  }, [selectedSymbol, klineMap, getLines]);
 
-  return <div ref={hostRef} className={className} />;
-}
+  return <div ref={containerRef} style={containerStyle} />;
+};
+
+export default KLineChart;
