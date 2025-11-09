@@ -11,7 +11,17 @@ import {
   FACTOR_CONFIG,
   type StockItem,
   type FKey,
+  type FilterState,
 } from "../store";
+
+/**
+ * 左侧结果列表：
+ * - 展示当前 universe 中，满足「搜索 + 勾选因子（F1-F6）」的标的；
+ * - 与 FACTOR_CONFIG 完全一致：
+ *    - FilterPanel 控制 FilterState.FX 开关
+ *    - 这里用 FACTOR_CONFIG.test 做实际判断
+ *    - SymbolDetail 也用同一套 FACTOR_CONFIG.test 展示通过情况
+ */
 
 const containerStyle: React.CSSProperties = {
   flex: "0 0 340px",
@@ -50,10 +60,9 @@ const itemSelected: React.CSSProperties = {
   background: "#eff6ff",
 };
 
-// ✅ 已读颜色改成浅橘色，比较醒目
 const itemRead: React.CSSProperties = {
   ...itemBase,
-  background: "#fff7ed", // tailwind 的 orange-50 类似
+  background: "#fff7ed",
 };
 
 const titleStyle: React.CSSProperties = {
@@ -76,8 +85,11 @@ const infoRowStyle: React.CSSProperties = {
 const scoreStyle: React.CSSProperties = { color: "#2563eb" };
 const bucketStyle: React.CSSProperties = { color: "#059669" };
 
-const FLAG_KEYS: FKey[] = FACTOR_CONFIG.map((f) => f.key);
-
+/**
+ * 文本搜索：
+ * - 支持代码 & 名称关键字；
+ * - 空字符串 = 不限制。
+ */
 function matchSearch(stock: StockItem, q: string): boolean {
   const text = q.trim();
   if (!text) return true;
@@ -88,9 +100,20 @@ function matchSearch(stock: StockItem, q: string): boolean {
   );
 }
 
-function matchFactors(stock: StockItem, filter: Record<FKey, boolean>): boolean {
+/**
+ * 多因子过滤：
+ * - 使用 FACTOR_CONFIG 驱动；
+ * - 若 filter[key] 为 true，则要求该因子 test(stock) 通过；
+ * - 所有勾选因子均通过，才保留该标的。
+ *
+ * 注意：
+ * - 这里以 FilterState 为输入（包含 q 和 F1-F6），实际只使用 FKey 部分。
+ * - 与 SymbolDetail 中展示逻辑共用 FACTOR_CONFIG，保证定义唯一。
+ */
+function matchFactors(stock: StockItem, filter: FilterState): boolean {
   for (const cfg of FACTOR_CONFIG) {
-    if (!filter[cfg.key]) continue;
+    const key = cfg.key as FKey;
+    if (!filter[key]) continue;      // 未勾选该因子 -> 不参与过滤
     if (!cfg.test(stock)) return false;
   }
   return true;
@@ -111,27 +134,39 @@ const ResultList: React.FC = () => {
     market: s.market,
   }));
 
+  /** 记录“某日已经点开看过”的标的，用于浅色标记 */
   const [readMap, setReadMap] = useState<Record<string, string>>({});
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // 当交易日变更时，清空已读标记
   useEffect(() => {
     setReadMap({});
   }, [market?.last_bar_date, market?.asof]);
 
+  /**
+   * 根据「搜索 + 勾选因子」得到当前可见列表：
+   * - 搜索命中；
+   * - 且满足所有开启的 F1-F6。
+   */
   const visible = useMemo(() => {
     if (!stocks?.length) return [];
-    const f = filter;
     return stocks
-      .filter((s) => matchSearch(s, f.q))
-      .filter((s) => matchFactors(s, f as any));
+      .filter((s) => matchSearch(s, filter.q))
+      .filter((s) => matchFactors(s, filter));
   }, [stocks, filter]);
 
+  /** 点击或键盘导航选中某个标的 */
   const handleSelect = (item: StockItem) => {
     setSelectedSymbol(item.symbol);
     const dayKey = market?.last_bar_date || market?.asof || "na";
     setReadMap((prev) => ({ ...prev, [item.symbol]: dayKey }));
   };
 
+  /**
+   * 键盘上下键导航：
+   * - 在当前 visible 列表中移动选中项；
+   * - 自动滚动到可见区域。
+   */
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!visible.length) return;
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -183,11 +218,8 @@ const ResultList: React.FC = () => {
           const dayKey = market?.last_bar_date || market?.asof || "na";
           const isRead = readMap[item.symbol] === dayKey;
           const isSelected = item.symbol === selectedSymbol;
-          const style = isSelected
-            ? itemSelected
-            : isRead
-            ? itemRead
-            : itemBase;
+          const style =
+            isSelected ? itemSelected : isRead ? itemRead : itemBase;
 
           return (
             <div

@@ -2,251 +2,257 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>日线多因子趋势过滤器｜规则解释 F1–F9</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading_App 多因子选股规则说明（F1-F6）</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, system-ui, -system-ui, sans-serif;
-      margin: 0;
-      padding: 24px 20px 40px;
-      background-color: #f9fafb;
+      font-family: -apple-system, BlinkMacSystemFont, -system-ui, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 0 16px 40px;
       color: #111827;
       line-height: 1.7;
-    }
-    .wrap {
-      max-width: 920px;
-      margin: 0 auto;
-      background: #ffffff;
-      border-radius: 18px;
-      padding: 24px 24px 28px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-      border: 1px solid #e5e7eb;
+      background: #f9fafb;
     }
     h1 {
-      margin: 0 0 6px;
-      font-size: 22px;
-      font-weight: 700;
-      color: #111827;
-    }
-    .subtitle {
-      font-size: 12px;
-      color: #6b7280;
-      margin-bottom: 16px;
+      font-size: 24px;
+      margin-bottom: 8px;
     }
     h2 {
-      margin-top: 20px;
-      margin-bottom: 4px;
-      font-size: 17px;
-      font-weight: 600;
+      font-size: 18px;
+      margin-top: 28px;
+      margin-bottom: 6px;
       color: #111827;
     }
     h3 {
-      margin: 10px 0 2px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #374151;
+      font-size: 15px;
+      margin-top: 14px;
+      margin-bottom: 4px;
+      color: #111827;
     }
     p {
-      margin: 3px 0 6px;
       font-size: 13px;
+      margin: 4px 0 8px;
       color: #374151;
-    }
-    code {
-      font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
-      background: #f3f4f6;
-      padding: 1px 4px;
-      border-radius: 4px;
-    }
-    .tag {
-      display: inline-flex;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 10px;
-      border: 1px solid #e5e7eb;
-      margin-left: 6px;
-      color: #6b7280;
     }
     ul {
-      margin: 4px 0 6px 18px;
-      padding: 0;
+      padding-left: 18px;
+      margin: 4px 0 10px;
+    }
+    li {
       font-size: 13px;
       color: #374151;
+      margin: 2px 0;
     }
-    .hint {
-      font-size: 11px;
-      color: #9ca3af;
-      margin-top: 14px;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: #eff6ff;
-      color: #2563eb;
+    .tag {
+      display: inline-block;
       padding: 2px 8px;
+      margin-right: 6px;
       border-radius: 999px;
-      font-size: 10px;
-      margin-left: 4px;
+      font-size: 11px;
+      background: #111827;
+      color: #f9fafb;
+    }
+    .sub {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 16px;
+    }
+    .highlight {
+      font-weight: 600;
+      color: #111827;
+    }
+    .divider {
+      border-top: 1px solid #e5e7eb;
+      margin: 24px 0;
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>日线多因子趋势过滤器 · 规则解释（F1–F9）</h1>
-    <div class="subtitle">
-      本页面说明前端「日线多因子趋势过滤器」中 F1–F9 的含义及实现口径，方便你从业务和代码两个角度理解与复盘。
-      <span class="pill">说明</span> 当前版本以 <code>public/out/universe.json</code> 为准。
-    </div>
-
-    <p>
-      系统整体思路：<strong>后端</strong>每天生成 <code>universe.json</code>，预计算好各类打分与布尔标签；
-      <strong>前端</strong>只做「可视化 + 组合过滤」，不再强制锁定任何「核心推荐池」。
-      F1–F9 都是可选项：<strong>勾选 = 启用该条件；不勾选 = 不限制。</strong>
-    </p>
-
-    <!-- F1 -->
-    <h2>F1 剔除 ST / 高风险个股<span class="tag">F1</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      过滤掉明显不适合作为趋势交易标的的股票，例如 ST、*ST、长期停牌、面值退市风险等。
-      目的：保证整个标的池的「标的质量」，避免技术面信号被壳股、雷股污染。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>后端在 <code>features</code> 中给出 <code>f_exclude_st: true/false</code>。</li>
-      <li>前端在 <code>universe.json</code> 载入时拍扁：<code>{ ...item, ...(features || {}) }</code>。</li>
-      <li>当勾选 F1 时：仅保留 <code>stock.f_exclude_st === true</code>（如字段缺失则视为通过）。</li>
-    </ul>
-
-    <!-- F2 -->
-    <h2>F2 强流动性<span class="tag">F2</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      要求标的具备稳定成交额，确保进出场可执行，不被「纸面信号」误导。
-      一般基于近 N 日成交额均值筛选。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>后端提供 <code>f_liquid_strong</code> 或基础字段 <code>amt60_avg</code>。</li>
-      <li>当前前端逻辑：优先使用 <code>f_liquid_strong</code>；若无，则以 <code>amt60_avg</code> 是否大于一定阈值判定（可在代码中调整）。</li>
-      <li>勾选 F2 时：<code>f_liquid_strong === true</code> 或满足阈值。</li>
-    </ul>
-
-    <!-- F3 -->
-    <h2>F3 合理价格区间<span class="tag">F3</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      限制在适合趋势交易的价格带，规避过低（流动性/预期问题）或过高（波动巨大、资金门槛高）的极端标的。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>后端可直接给 <code>f_price_floor</code>。</li>
-      <li>当前前端兜底逻辑：若无显式布尔值，则使用 <code>close</code> 在 [3, 80] 区间的标的视为通过。</li>
-      <li>勾选 F3 时：<code>f_price_floor === true</code> 或落在配置区间内。</li>
-    </ul>
-
-    <!-- F4 -->
-    <h2>F4 高成交额<span class="tag">F4</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      强调「有量的趋势」，避免在冷门股上画线。典型口径：当日或近几日成交额达到一定规模。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>依赖字段如 <code>amount_t</code>（当日成交额）、<code>amt5_avg</code> 等。</li>
-      <li>前端当前示例：当日成交额或近短期均额 &gt;= 配置阈值视为通过（字段缺失则不限制）。</li>
-    </ul>
-
-    <!-- F5 -->
-    <h2>F5 放量确认<span class="tag">F5</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      趋势启动或延续应伴随「相对放量」，用成交量相对均量的比例做确认，避免无量上涨的虚弱趋势。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>依赖 <code>vr</code> 或 <code>vol_ratioXX</code> 等放量比例指标。</li>
-      <li>勾选 F5 时：当日成交量 / 均量 ≥ 设定阈值（例如 1.2+）。</li>
-    </ul>
-
-    <!-- F6 -->
-    <h2>F6 行业相对强<span class="tag">F6</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      优先在「相对强势行业」里选股：个股背后至少不是拖后腿的行业，甚至是景气赛道。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>依赖如 <code>industry_rs20</code>、<code>industry_rank</code> 等行业相对强度/排名字段。</li>
-      <li>勾选 F6 时：仅保留位于前若干分位/排名的行业（具体阈值可在代码中调整）。</li>
-    </ul>
-
-    <!-- F7 -->
-    <h2>F7 强势行业 / 主题<span class="tag">F7</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      将「主题/板块」信号纳入，集中火力在市场主线，而不是在弱势板块里挖趋势。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>依赖后端对板块/主题打的强度标签，如 <code>f_strong_industry</code>、主题得分等。</li>
-      <li>当前前端默认逻辑保守，可根据后端输出完善为「勾选 F7 仅保留强势行业/主题标的」。</li>
-    </ul>
-
-    <!-- F8 -->
-    <h2>F8 多头均线结构<span class="tag">F8</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      要求价格处在相对健康的多头结构中，例如短期均线在上、长期在下，价格不破关键中长期均线。
-      本质是「顺势」。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>后端可给出布尔值 <code>f_bull_ma</code>，或提供 <code>ma5/ma13/ma39...</code>。</li>
-      <li>勾选 F8 时：优先使用 <code>f_bull_ma === true</code>；若无，则可约定
-        <code>ma5 &gt; ma13 &gt; ma39</code> 且 <code>close &gt; ma13</code> 等条件。
-      </li>
-    </ul>
-
-    <!-- F9 -->
-    <h2>F9 突破 / 趋势强化<span class="tag">F9</span></h2>
-    <h3>业务含义</h3>
-    <p>
-      捕捉「已经走出来」或「正在加速」的票：
-      突破阶段高点、箱体上沿、关键均线，或趋势强度指标显著提升。
-    </p>
-    <h3>实现口径 / 代码逻辑</h3>
-    <ul>
-      <li>依赖 <code>f_breakout</code>、<code>trend_breakout</code>、近 N 日新高、RS 突破等信号。</li>
-      <li>勾选 F9 时：仅保留被判定为「突破/强化」的标的。</li>
-    </ul>
-
-    <h2>前端如何使用这些规则？</h2>
-    <p>
-      在前端，我们做了三件事：
-    </p>
-    <ul>
-      <li>
-        载入 <code>universe.json</code> 后，将每条记录的 <code>features</code> 拍扁到顶层，
-        统一通过 <code>StockItem</code> 使用。
-      </li>
-      <li>
-        定义 <code>FACTOR_CONFIG</code>（见 <code>src/store.ts</code>）：
-        为每个 F 配置 <code>key / label / test(stock)</code>，前端过滤完全基于这些纯函数，
-        无「隐藏锁池」。
-      </li>
-      <li>
-        FilterPanel 勾选 → 更新 <code>filter.Fx</code> → ResultList 在
-        <code>matchFactors</code> 中依次调用对应 <code>test</code>，仅对勾选的 F 生效；
-        字段缺失默认「放行」，避免误杀。
-      </li>
-    </ul>
-
-    <p class="hint">
-      注：本页为静态说明文档，实际阈值与口径以你部署环境中的后端配置为准。
-      如需调整，只要同时更新后端导出的字段和 <code>FACTOR_CONFIG</code> 中对应的 <code>test</code> 即可。
-    </p>
+  <h1>Trading_App 多因子选股规则说明</h1>
+  <div class="sub">
+    当前版本启用的规则为 <span class="highlight">F1 - F6</span>。<br />
+    它们共同服务于一个目标：在每日收盘前，筛出一批
+    <span class="highlight">流动性稳定、价格合理、趋势健康、行业占优</span>的标的，作为当日可重点研究与备选的趋势股池。
   </div>
+
+  <!-- F1 -->
+  <div class="divider"></div>
+  <span class="tag">F1 剔除风险股 / ST</span>
+
+  <h3>1. 直觉：先把「明显不能碰的」扔出去</h3>
+  <p>
+    在做任何趋势和结构分析之前，第一步是避免踩雷。带有 ST/*ST 等风险标记的股票，往往意味着：
+  </p>
+  <ul>
+    <li>基本面或财务存在重大不确定；</li>
+    <li>可能面临退市风险、交易限制；</li>
+    <li>走势经常受到监管、消息面等非技术因素主导。</li>
+  </ul>
+  <p>
+    将这类标的排除，可以避免「明知道是地雷还去博弈」的情况，让选股更聚焦在正常公司和可持续趋势上。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <ul>
+    <li>剔除名称中带有 “ST” 标记的股票（包含 ST、*ST 等形式）。</li>
+    <li>后续如有更完善的高风险标记，也会统一纳入此步过滤。</li>
+    <li>通过 F1 的标的，仅代表「未被标记为明显风险股」，不等于基本面优秀，只是排除了底线以下。</li>
+  </ul>
+
+  <!-- F2 -->
+  <div class="divider"></div>
+  <span class="tag">F2 强流动性</span>
+
+  <h3>1. 直觉：保证「进得去、出得来」</h3>
+  <p>
+    再好的形态，如果没人交易，都是纸上谈兵。流动性不足会带来：
+  </p>
+  <ul>
+    <li>买不到 / 卖不掉：挂单成交困难，滑点巨大；</li>
+    <li>价格易被少量资金操纵，技术信号失真。</li>
+  </ul>
+  <p>
+    因此我们要求标的具备持续、稳定的成交额和换手率，确保信号可信、交易可执行。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <p>满足以下条件才视为「通过」强流动性筛选：</p>
+  <ul>
+    <li><span class="highlight">近 60 日平均日成交额 ≥ 500 万元</span>；</li>
+    <li><span class="highlight">近 60 日平均换手率 ≥ 0.8%</span>；</li>
+    <li><span class="highlight">最近一天换手率 ≥ 0.6%</span>。</li>
+  </ul>
+  <p>
+    任意关键数据缺失或不达标，即视为不通过。这样得到的标的，基本可以认为在正常仓位规模下是「好进好出」的。
+  </p>
+
+  <!-- F3 -->
+  <div class="divider"></div>
+  <span class="tag">F3 合理价格区间</span>
+
+  <h3>1. 直觉：规避极端价位带来的结构性问题</h3>
+  <p>
+    过低价格的股票（如几毛到几块）：
+  </p>
+  <ul>
+    <li>容易伴随基本面存疑、长期弱势；</li>
+    <li>盘口容易被少量资金「玩数字游戏」。</li>
+  </ul>
+  <p>
+    极高价格的股票：
+  </p>
+  <ul>
+    <li>单位波动幅度大，仓位管理难度高；</li>
+    <li>在趋势策略中容易放大短期回撤。</li>
+  </ul>
+  <p>
+    通过设置合理的价格区间，可以让策略聚焦在相对健康、便于仓位控制的标的上。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <ul>
+    <li>仅保留 <span class="highlight">当前股价在 3 元至 80 元之间</span> 的标的。</li>
+    <li>低于 3 元或高于 80 元的标的被排除在池外。</li>
+  </ul>
+
+  <!-- F4 -->
+  <div class="divider"></div>
+  <span class="tag">F4 放量确认</span>
+
+  <h3>1. 直觉：「有人真正在出价」的上涨才更可信</h3>
+  <p>
+    很多图形看起来在突破或向上，但如果量能跟不上，往往更像是「虚高」：
+  </p>
+  <ul>
+    <li>少量撮合就能拉出 K 线，却没有真实资金接力；</li>
+    <li>假突破、冲高回落的概率高。</li>
+  </ul>
+  <p>
+    放量配合价格不弱，意味着有真金白银在支持当前方向，是趋势延续更可信的信号。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <p>我们从两个角度确认「有效放量」，并叠加价格条件：</p>
+  <ul>
+    <li>与全市场相比：量能位于市场前段（量比分位较高）；或</li>
+    <li>与自身过去相比：<span class="highlight">当日成交量 ≥ 过去 20 日平均成交量的 1.2 倍</span>；</li>
+    <li>同时要求：<span class="highlight">当日收盘价不低于前一日收盘价</span>。</li>
+  </ul>
+  <p>
+    只有「放量」与「价格不走弱」同时满足时，才视作通过。否则视为不足以支撑趋势判断。
+  </p>
+
+  <!-- F5 -->
+  <div class="divider"></div>
+  <span class="tag">F5 多头趋势结构</span>
+
+  <h3>1. 直觉：只跟「已经进入顺势上行结构」的票</h3>
+  <p>
+    与其赌反转，不如顺着已经形成的趋势走。一个健康的多头趋势通常具备：</p>
+  <ul>
+    <li>短期均线在上，中期均线其后，长期均线在下，呈「有序多头排列」；</li>
+    <li>价格站在关键均线之上，而不是纠缠或跌破；</li>
+    <li>短期均线本身在抬升，而不是横着或拐头向下。</li>
+  </ul>
+  <p>
+    F5 的作用是：从「看起来涨了一下」里，筛出那些确实已经进入结构化上升趋势的标的。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <p>一只股票要被认定为通过 F5，需要同时满足：</p>
+  <ul>
+    <li>短、中、长三条均线呈多头排列：
+      <span class="highlight">短期均线 ≥ 中期均线 ≥ 长期均线</span>；</li>
+    <li><span class="highlight">当前收盘价在中期均线之上</span>（价格不拖后腿）；</li>
+    <li>短期均线在最近一段时间内持续抬升：
+      <span class="highlight">最近 5 个交易日内，短期均线上升幅度 ≥ 1.5%</span>。</li>
+  </ul>
+  <p>
+    任一条件不满足，则不视作成熟多头趋势。这样得到的是一批「趋势已经成型，而不是刚刚乱动两天」的标的。
+  </p>
+
+  <!-- F6 -->
+  <div class="divider"></div>
+  <span class="tag">F6 强板块龙头</span>
+
+  <h3>1. 直觉：顺着主线资金，选「板块里最能打的那几个」</h3>
+  <p>
+    在实际市场环境中，行情往往以「板块 / 产业 / 主题」为单位轮动。
+    与其在冷门行业里找孤立走势，不如：
+  </p>
+  <ul>
+    <li>先确认哪些行业整体在变强（资金持续流入，普遍上涨）；</li>
+    <li>再从这些行业里，挑出涨得最稳、最有代表性的龙头股。</li>
+  </ul>
+  <p>
+    F6 的作用就是：
+    <span class="highlight">只在强势行业中，挑出前排龙头</span>，
+    把「跟对方向」和「选对个股」合并为一个条件。
+  </p>
+
+  <h3>2. 实现逻辑（口径说明）</h3>
+  <p>分两步完成：</p>
+  <ul>
+    <li>
+      <span class="highlight">判断强势行业：</span><br />
+      看每个行业内成分股最近约 20 个交易日的整体表现，
+      只把那些「整体涨幅排在全市场前 40%」的行业视为强势板块。
+    </li>
+    <li>
+      <span class="highlight">在强势行业中选龙头：</span><br />
+      在每个强势行业里，将个股按最近 20 日表现从高到低排序，
+      只保留每个行业的前几名（最多前 5 名），视为龙头候选。
+    </li>
+  </ul>
+  <p>
+    同时满足「所在行业是强势行业」且「在该行业内排在前列」的股票，
+    才会通过 F6。这一步有效减少「弱板块里伪龙头」和「杂兵股」进入结果集。
+  </p>
+
+  <div class="divider"></div>
+  <p class="sub">
+    注：以上规则均基于每日收盘数据计算，并采用「信息不足则不通过」的保守原则。
+    这保证了系统在回测与实盘中的行为可复现、可解释，而不是依赖人工主观调节。
+  </p>
 </body>
 </html>

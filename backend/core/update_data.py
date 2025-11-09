@@ -138,21 +138,49 @@ def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:
     return f"{last[:4]}-{last[4:6]}-{last[6:8]}"
 
 
-def _fetch_daily_tushare(
+def _fetch_daily_with_basic_tushare(
     pro,
     ts_code: str,
     start_date: Optional[str],
     end_date: Optional[str],
 ) -> pd.DataFrame:
+    """
+    从 tushare 抓取日线 + daily_basic(turnover_rate)，合并为一张表：
+    - Date, Open, High, Low, Close, Volume
+    - TurnoverRate: 换手率（小数，0.01 = 1%）
+    """
     params = {"ts_code": ts_code}
     if start_date:
         params["start_date"] = start_date
     if end_date:
         params["end_date"] = end_date
-    df = pro.daily(**params)
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+
+    # 日线
+    df_daily = pro.daily(**params)
+    if df_daily is None or df_daily.empty:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume", "TurnoverRate"])
+
+    # daily_basic: 只拿 turnover_rate，减少积分
+    df_basic = pro.daily_basic(
+        ts_code=ts_code,
+        start_date=params.get("start_date"),
+        end_date=params.get("end_date"),
+        fields="ts_code,trade_date,turnover_rate",
+    )
+    if df_basic is None or df_basic.empty:
+        df_basic = pd.DataFrame(columns=["ts_code", "trade_date", "turnover_rate"])
+
+    # 合并
+    df = df_daily.merge(
+        df_basic,
+        on=["ts_code", "trade_date"],
+        how="left",
+        suffixes=("", "_basic"),
+    )
+
     df = df.sort_values("trade_date").reset_index(drop=True)
+
+    # 构造输出
     out = pd.DataFrame(
         {
             "Date": pd.to_datetime(df["trade_date"]),
@@ -163,6 +191,14 @@ def _fetch_daily_tushare(
             "Volume": df["vol"].astype(float),  # 单位：手
         }
     )
+
+    # TurnoverRate：转为小数（0.xx），缺失保持 NaN
+    if "turnover_rate" in df.columns:
+        tr = pd.to_numeric(df["turnover_rate"], errors="coerce") / 100.0
+    else:
+        tr = pd.Series([float("nan")] * len(out))
+    out["TurnoverRate"] = tr
+
     return out
 
 
@@ -171,6 +207,14 @@ def _merge_incremental(existing: Optional[pd.DataFrame], new_df: pd.DataFrame) -
         return new_df
     if new_df is None or new_df.empty:
         return existing
+
+    # 兼容老 CSV 没有 TurnoverRate 的情况：补列为 NaN 再 concat
+    for col in ["TurnoverRate"]:
+        if col not in existing.columns:
+            existing[col] = float("nan")
+        if col not in new_df.columns:
+            new_df[col] = float("nan")
+
     merged = pd.concat([existing, new_df], ignore_index=True)
     merged = merged.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
     return merged
@@ -216,7 +260,12 @@ def update_one_tushare(
             datetime(start_dt.year, start_dt.month, start_dt.day, tzinfo=TZ_SH)
         )
 
-    new_df = _fetch_daily_tushare(pro, ts_code, start_yyyymmdd, end_yyyymmdd)
+    new_df = _fetch_daily_with_basic_tushare(
+        pro,
+        ts_code=ts_code,
+        start_date=start_yyyymmdd,
+        end_date=end_yyyymmdd,
+    )
 
     if existing is None and csv_path.exists():
         existing = read_existing(csv_path)

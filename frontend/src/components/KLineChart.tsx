@@ -14,16 +14,34 @@ import {
   type KLineBar,
 } from "../store";
 
-/**
- * 日K图：
- * - 根据 selectedSymbol 展示 K 线
- * - 点击图表：在点击 Y 坐标对应的价格处生成水平线（存入全局 store）
- * - 为适配不同版本 lightweight-charts，我们在点击回调里使用 `as any`
- */
-
-const containerStyle: React.CSSProperties = {
+const wrapperStyle: React.CSSProperties = {
+  position: "relative",
   width: "100%",
   height: "100%",
+};
+
+const chartContainerStyle: React.CSSProperties = {
+  position: "absolute",
+  inset: 0,
+};
+
+const toolbarStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 6,
+  right: 6,
+  display: "flex",
+  gap: 6,
+  zIndex: 2,
+};
+
+const toolbarBtn: React.CSSProperties = {
+  padding: "2px 8px",
+  fontSize: 10,
+  borderRadius: 999,
+  border: "1px solid #e5e7eb",
+  background: "rgba(255,255,255,0.96)",
+  color: "#4b5563",
+  cursor: "pointer",
 };
 
 const KLineChart: React.FC = () => {
@@ -34,12 +52,51 @@ const KLineChart: React.FC = () => {
   const selectedSymbolRef = useRef<string | null>(null);
 
   const selectedSymbol = useDataStore((s) => s.selectedSymbol);
-  const klineMap = useDataStore((s) => s.klineMap);
-  const loadKline = useDataStore((s) => s.loadKline);
-  const getLines = useDataStore((s) => s.getLines);
-  const addLine = useDataStore((s) => s.addLine);
+  const klineMap = useDataStore((s) => s.klineMap || {});
+  const priceLines = useDataStore((s) => s.priceLines || {});
 
-  /** 初始化图表和点击事件 */
+  const loadKline = useDataStore((s) => s.loadKline);
+  const addLine = useDataStore((s) => s.addLine);
+  const clearLines = useDataStore((s) => s.clearLines);
+
+  /** 从点击事件中尽力推导价格（兼容不同版本 lightweight-charts） */
+  const getPriceFromClick = (param: MouseEventParams<Time>): number | null => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    const anyParam = param as any;
+    if (!chart || !series) return null;
+
+    const point = anyParam?.point;
+    if (!point) return null;
+
+    // 方案1：seriesData.close（有的话最稳）
+    if (anyParam.seriesData) {
+      const d =
+        anyParam.seriesData.get?.(series as any) ??
+        anyParam.seriesData[series as any];
+      if (d && typeof d.close === "number") {
+        return d.close;
+      }
+    }
+
+    // 方案2：series.priceScale().coordinateToPrice
+    const psFromSeries: any = (series as any).priceScale?.();
+    if (psFromSeries?.coordinateToPrice) {
+      const p = psFromSeries.coordinateToPrice(point.y);
+      if (p != null && Number.isFinite(p)) return p;
+    }
+
+    // 方案3：chart.priceScale('right').coordinateToPrice
+    const psFromChart: any = (chart as any).priceScale?.("right");
+    if (psFromChart?.coordinateToPrice) {
+      const p = psFromChart.coordinateToPrice(point.y);
+      if (p != null && Number.isFinite(p)) return p;
+    }
+
+    return null;
+  };
+
+  /** 初始化图表和点击事件（只跑一次） */
   useEffect(() => {
     if (!containerRef.current || chartRef.current) return;
 
@@ -80,30 +137,15 @@ const KLineChart: React.FC = () => {
     handleResize();
     window.addEventListener("resize", handleResize);
 
-    // 点击生成水平线：用像素 -> 价格，全部用 any 规避类型差异
     const handleClick = (param: MouseEventParams<Time>) => {
       const symbol = selectedSymbolRef.current;
-      if (!symbol || !seriesRef.current) return;
+      if (!symbol) return;
 
-      const anyParam = param as any;
-      const point = anyParam?.point;
-      if (!point) return;
-
-      const priceScale: any = (seriesRef.current as any).priceScale?.();
-      if (!priceScale || typeof priceScale.coordinateToPrice !== "function") {
-        // 某些极端版本没有该方法，就直接跳过，保证不报错
-        return;
-      }
-
-      const price = priceScale.coordinateToPrice(point.y);
+      const price = getPriceFromClick(param);
       if (price == null || !Number.isFinite(price)) return;
 
-      const line: PriceLine = {
-        id: `pl_${symbol}_${price.toFixed(2)}_${Date.now()}`,
-        price,
-        title: price.toFixed(2),
-      };
-      addLine(symbol, line);
+      const rounded = Number(price.toFixed(2));
+      addLine(symbol, rounded); // 去重 & 持久化都在 store 里
     };
 
     chart.subscribeClick(handleClick);
@@ -116,9 +158,10 @@ const KLineChart: React.FC = () => {
       seriesRef.current = null;
       lineMapRef.current.clear();
     };
-  }, [addLine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  /** 跟踪当前选中 symbol，懒加载 K 线 */
+  /** 选中标的变化时：更新 ref & 懒加载 K 线数据 */
   useEffect(() => {
     selectedSymbolRef.current = selectedSymbol || null;
     if (selectedSymbol) {
@@ -126,20 +169,26 @@ const KLineChart: React.FC = () => {
     }
   }, [selectedSymbol, loadKline]);
 
-  /** 更新图表数据 & 水平线 */
+  /**
+   * 当 symbol / kline / priceLines 变化时：
+   * - 设置 K 线数据
+   * - 基于当前 symbol 的 priceLines 重画水平线
+   */
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
     if (!chart || !series) return;
 
+    // 清理旧线
+    lineMapRef.current.forEach((pl) => {
+      try {
+        series.removePriceLine(pl);
+      } catch {}
+    });
+    lineMapRef.current.clear();
+
     if (!selectedSymbol) {
       series.setData([]);
-      lineMapRef.current.forEach((pl) => {
-        try {
-          series.removePriceLine(pl);
-        } catch {}
-      });
-      lineMapRef.current.clear();
       return;
     }
 
@@ -151,6 +200,7 @@ const KLineChart: React.FC = () => {
 
     series.setData(bars as any);
 
+    // 默认展示最近 80 根
     const n = bars.length;
     if (n > 80) {
       const from = bars[n - 80].time as any;
@@ -160,29 +210,40 @@ const KLineChart: React.FC = () => {
       chart.timeScale().fitContent();
     }
 
-    // 清理旧线
-    lineMapRef.current.forEach((pl) => {
-      try {
-        series.removePriceLine(pl);
-      } catch {}
-    });
-    lineMapRef.current.clear();
-
-    // 绘制当前 symbol 的线
-    const lines = getLines(selectedSymbol) || [];
+    // 画出当前 symbol 的水平线
+    const lines: PriceLine[] = priceLines[selectedSymbol] || [];
     lines.forEach((l) => {
+      const id = l.id || `pl_${selectedSymbol}_${l.price.toFixed(2)}`;
       const pl = series.createPriceLine({
         price: l.price,
-        title: l.title,
-        color: "#6b7280",
-        lineWidth: 1,
+        // 不设置 title，避免“8.30 8.30”双标签，只保留一个轴标签
+        color: "#1d4ed8", // 更醒目的橙色
+        lineWidth: 1,     // 比默认更粗
         lineStyle: LineStyle.Dashed,
       });
-      lineMapRef.current.set(l.id, pl);
+      lineMapRef.current.set(id, pl);
     });
-  }, [selectedSymbol, klineMap, getLines]);
+  }, [selectedSymbol, klineMap, priceLines]);
 
-  return <div ref={containerRef} style={containerStyle} />;
+  /** 清除当前标的所有水平线 */
+  const handleClear = () => {
+    if (!selectedSymbol) return;
+    clearLines(selectedSymbol);
+    // priceLines 变化会触发上面的 effect 自动清除图上线
+  };
+
+  return (
+    <div style={wrapperStyle}>
+      <div ref={containerRef} style={chartContainerStyle} />
+      {selectedSymbol && (
+        <div style={toolbarStyle}>
+          <button style={toolbarBtn} onClick={handleClear}>
+            清除本标的水平线
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default KLineChart;

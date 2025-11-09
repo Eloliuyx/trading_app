@@ -1,4 +1,5 @@
 // src/pages/MarketHome.tsx
+
 import React, { useEffect } from "react";
 import { useDataStore } from "../store";
 import FilterPanel from "../components/FilterPanel";
@@ -56,7 +57,7 @@ const contentWrapper: React.CSSProperties = {
   flex: 1,
   display: "flex",
   flexDirection: "column",
-  minHeight: 0,
+  minHeight: 0, // 关键：让内部 flex 区域可以正确分配高度
 };
 
 const mainStyle: React.CSSProperties = {
@@ -70,7 +71,23 @@ const rightPanel: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   minWidth: 0,
+  minHeight: 0,
   background: "#ffffff",
+};
+
+/** 上方 K 线区域：固定高度，防止撑爆下面详情区 */
+const klineWrapper: React.CSSProperties = {
+  flex: "0 0 380px", // 你可以根据喜好调 240-320
+  minHeight: 220,
+  borderBottom: "1px solid #e5e7eb",
+  overflow: "hidden",
+};
+
+/** 下方详情 + 笔记区域：吃掉剩余高度，可以滚动 */
+const detailWrapper: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: "auto",
 };
 
 const MarketHome: React.FC = () => {
@@ -122,16 +139,10 @@ const MarketHome: React.FC = () => {
         <div style={mainStyle}>
           <ResultList />
           <div style={rightPanel}>
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                borderBottom: "1px solid #e5e7eb",
-              }}
-            >
+            <div style={klineWrapper}>
               <KLineChart />
             </div>
-            <div style={{ flex: "0 0 auto" }}>
+            <div style={detailWrapper}>
               <SymbolDetail />
             </div>
           </div>
