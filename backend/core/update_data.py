@@ -116,9 +116,19 @@ def update_manifest_entry(manifest_path: Path, sym: str, new_last_day: str) -> N
 def _tushare_client(token: Optional[str]):
     import tushare as ts
 
-    if token:
-        return ts.pro_api(token)
+    # 优先用命令行 --token
+    if not token:
+        # 再尝试环境变量
+        token = os.getenv("TUSHARE_TOKEN") or os.getenv("TUSHARE_PRO_TOKEN")
+
+    if not token:
+        raise SystemExit(
+            "未找到 TuShare token，请通过 --token 或环境变量 TUSHARE_TOKEN 提供。"
+        )
+
+    ts.set_token(token)
     return ts.pro_api()
+
 
 
 def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:

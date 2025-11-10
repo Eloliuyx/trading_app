@@ -28,7 +28,7 @@ const headerRowStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 18,
+  fontSize: 22,
   fontWeight: 700,
   color: "#111827",
 };
@@ -108,14 +108,14 @@ const MarketHome: React.FC = () => {
     <div style={pageStyle}>
       <header style={headerStyle}>
         <div style={headerRowStyle}>
-          <div style={titleStyle}>日线多因子趋势过滤器</div>
+          <div style={titleStyle}>A股日线多因子选股器</div>
           <a
             href="/reco_logic_zh.html"
             target="_blank"
             rel="noreferrer"
             style={linkStyle}
           >
-            规则解释（F1–F9）
+            筛选规则解释
           </a>
         </div>
         <div style={subtitleStyle}>

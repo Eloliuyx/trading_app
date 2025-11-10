@@ -85,53 +85,52 @@ type FactorCfg = {
 };
 
 export const FACTOR_CONFIG: FactorCfg[] = [
+  // F1：剔除风险股 / ST
   {
     key: "F1",
-    label: "F1 高流动性（强制过滤）",
-    test: (s) => s.pass_liquidity_v2 !== false,
+    label: "剔除ST股",
+    // 名称带 ST 的视为不通过；没有 is_st 字段时默认通过
+    test: (s) => s.is_st !== true,
   },
+
+  // F2：高流动性（保证进得去出得来）
   {
     key: "F2",
-    label: "F2 价格合规（不低于限定价）",
-    test: (s) => s.pass_price_compliance !== false,
+    label: "高流动性",
+    // 后端已根据「近 60 日成交额 / 换手率」打好 pass_liquidity_v2
+    // !== false：缺失时默认视作不通过可以根据你实际口径调整
+    test: (s) => s.pass_liquidity_v2 !== false,
   },
+
+  // F3：合理价格区间（3~80 元等）
   {
     key: "F3",
-    label: "F3 多头趋势结构",
-    test: (s) => s.pass_trend === true,
+    label: "合理价格区间",
+    // 对应你说明里的价格区间规则
+    test: (s) => s.pass_price_compliance !== false,
   },
+
+  // F4：放量确认
   {
     key: "F4",
-    label: "F4 放量确认",
+    label: "放量确认",
+    // 只有明确 true 才算通过（与说明里“量价都满足才通过”一致）
     test: (s) => s.pass_volume_confirm === true,
   },
+
+  // F5：多头趋势结构
   {
     key: "F5",
-    label: "F5 行业龙头 / 强势板块",
-    test: (s) => s.pass_industry_leader === true,
+    label: "多头趋势结构",
+    test: (s) => s.pass_trend === true,
   },
+
+  // F6：强板块龙头
   {
     key: "F6",
-    label: "F6 相对强度（强于大盘）",
-    test: (s) => s.pass_rs === true,
-  },
-  {
-    key: "F7",
-    label: "F7 突破 / 型态确认",
-    test: (s) =>
-      s.pass_breakout === true || s.pass_breakout === undefined,
-  },
-  {
-    key: "F8",
-    label: "F8 质地与风险合格",
-    test: (s) =>
-      s.pass_quality === true || s.pass_quality === undefined,
-  },
-  {
-    key: "F9",
-    label: "F9 其他风控（无明显雷区）",
-    test: (s) =>
-      s.pass_risk !== false, // 默认通过，只有明确 false 才否
+    label: "强板块龙头",
+    // 后端已根据行业强度 + 排名给出 pass_industry_leader
+    test: (s) => s.pass_industry_leader === true,
   },
 ];
 

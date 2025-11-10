@@ -12,12 +12,12 @@
   --radius-sm:10px;
   --shadow:0 1px 0 rgba(15,23,42,.04),0 10px 30px rgba(2,6,23,.06);
 
-  --fz-xxs:11px;
-  --fz-xs:12px;
-  --fz-sm:13px;
-  --fz-md:14px;
-  --fz-lg:15px;
-  --fz-xl:16px;
+  --fz-xxs:14px;
+  --fz-xs:15px;
+  --fz-sm:16px;
+  --fz-md:17px;
+  --fz-lg:18px;
+  --fz-xl:19px;
 }
 
 
@@ -115,7 +115,7 @@ a:hover{text-decoration:underline}
 .date{font-size:var(--fz-xxs);color:#9ca3af;margin-bottom:2px}
 
 /* —— 文本 —— */
-.h1{font-size:18px;font-weight:800;letter-spacing:-.01em;margin:0}
+.h1{font-size:22px;font-weight:800;letter-spacing:-.01em;margin:0}
 .sub{color:var(--muted);font-size:var(--fz-xs);margin-top:2px}
 
 /* —— 滚动条（Webkit）—— */
