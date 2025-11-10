@@ -37,5 +37,5 @@
     "react-router-dom": "^7.9.5",
     "zustand": "^4.5.7"
   },
-  "version": "2.2.0"
+  "version": "2.3.0"
 }
