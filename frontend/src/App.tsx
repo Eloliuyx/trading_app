@@ -1,8 +1,8 @@
+// src/App.tsx
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import MarketHome from "./pages/MarketHome";
-import SymbolPage from "./pages/Symbol";
-
+import SymbolPage from "./pages/Symbol"; //
 
 export default function App() {
   return (

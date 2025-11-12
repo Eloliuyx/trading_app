@@ -10,8 +10,8 @@ import {
   useDataStore,
   FACTOR_CONFIG,
   type StockItem,
-  type FKey,
   type FilterState,
+  type FactorKey,
 } from "../store";
 
 /**
@@ -59,7 +59,7 @@ function persistReadMap(map: Record<string, string>) {
 }
 
 const containerStyle: React.CSSProperties = {
-  flex: "0 0 260px", // 左侧宽度，可按需再微调
+  flex: "0 0 260px",
   display: "flex",
   flexDirection: "column",
   borderRight: "1px solid #e5e7eb",
@@ -156,7 +156,7 @@ function matchSearch(stock: StockItem, q: string): boolean {
 /** 多因子过滤：仅对勾选的因子应用 test */
 function matchFactors(stock: StockItem, filter: FilterState): boolean {
   for (const cfg of FACTOR_CONFIG) {
-    const key = cfg.key as FKey;
+    const key: FactorKey = cfg.key;
     if (!filter[key]) continue;
     if (!cfg.test(stock)) return false;
   }
@@ -164,19 +164,14 @@ function matchFactors(stock: StockItem, filter: FilterState): boolean {
 }
 
 const ResultList: React.FC = () => {
-  const {
-    stocks,
-    filter,
-    selectedSymbol,
-    setSelectedSymbol,
-    market,
-  } = useDataStore((s) => ({
-    stocks: s.stocks,
-    filter: s.filter,
-    selectedSymbol: s.selectedSymbol,
-    setSelectedSymbol: s.setSelectedSymbol,
-    market: s.market,
-  }));
+  const { stocks, filter, selectedSymbol, setSelectedSymbol, market } =
+    useDataStore((s) => ({
+      stocks: s.stocks,
+      filter: s.filter,
+      selectedSymbol: s.selectedSymbol,
+      setSelectedSymbol: s.setSelectedSymbol,
+      market: s.market,
+    }));
 
   const [readMap, setReadMap] = useState<Record<string, string>>(
     () => loadReadMap()
@@ -312,6 +307,7 @@ const ResultList: React.FC = () => {
                 {item.is_st && "｜ST"}
               </div>
               <div style={infoRowStyle}>
+                {/* 预留：如果以后后端加 score/bucket，可以自然显示 */}
                 {typeof item.score === "number" && (
                   <span style={scoreStyle}>
                     Score {Math.round(item.score)}

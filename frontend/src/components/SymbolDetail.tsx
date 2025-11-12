@@ -6,12 +6,11 @@ import {
   type StockItem,
 } from "../store";
 
-/** ====== 视觉样式改进版 ======
- * 目标：
- * - 字体层级清晰，留白舒适；
- * - 中英文都友好；
- * - 强调层次：标题>副标题>标签>笔记；
- * - 统一现代 Web App 感。
+/**
+ * 右侧详情面板：
+ * - 显示当前选中标的的基础信息
+ * - 显示多因子（F1-F6）通过情况
+ * - 提供本地笔记功能（仅存储在本机 localStorage）
  */
 
 const fontFamily =
@@ -38,24 +37,6 @@ const subtitle: React.CSSProperties = {
   fontSize: 13,
   color: "#6b7280",
   marginTop: -4,
-};
-
-const infoRow: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  alignItems: "center",
-  marginTop: 2,
-  fontSize: 13,
-};
-
-const scoreStyle: React.CSSProperties = {
-  color: "#2563eb",
-  fontWeight: 500,
-};
-
-const bucketStyle: React.CSSProperties = {
-  color: "#059669",
-  fontWeight: 500,
 };
 
 const secTitle: React.CSSProperties = {
@@ -91,13 +72,6 @@ const tagFail: React.CSSProperties = {
   ...tagBase,
   color: "#9ca3af",
   background: "#f9fafb",
-};
-
-const reason: React.CSSProperties = {
-  fontSize: 14,
-  color: "#374151",
-  lineHeight: 1.6,
-  paddingLeft: 4,
 };
 
 const noteInput: React.CSSProperties = {
@@ -177,6 +151,7 @@ const SymbolDetail: React.FC = () => {
 
   return (
     <div style={container}>
+      {/* 基本信息 */}
       <div style={title}>
         {item.symbol} {item.name}
       </div>
@@ -187,21 +162,13 @@ const SymbolDetail: React.FC = () => {
         {asof && ` ｜ 数据截至：${asof}`}
       </div>
 
-      <div style={infoRow}>
-        {typeof item.score === "number" && (
-          <span style={scoreStyle}>
-            综合评分 {Math.round(item.score)}
-          </span>
-        )}
-        {item.bucket && <span style={bucketStyle}>{item.bucket}</span>}
-      </div>
-
+      {/* 多因子规则通过情况 */}
       <div style={secTitle}>多因子规则通过情况</div>
       <div style={tagRow}>
         {FACTOR_CONFIG.map((f) => {
           const pass = f.test(item);
           const style = pass ? tagPass : tagFail;
-          const prefix = pass ? "✓" : "•";
+          const prefix = pass ? "✓" : "";
           return (
             <span key={f.key} style={style}>
               {prefix} {f.label}
@@ -210,20 +177,7 @@ const SymbolDetail: React.FC = () => {
         })}
       </div>
 
-      {Array.isArray(item.reasons) && item.reasons.length > 0 && (
-        <>
-          <div style={secTitle}>机器解读 / 备注</div>
-          <div>
-            {item.reasons.map((r, i) => (
-              <div key={i} style={reason}>
-                • {r}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* 笔记输入区域 */}
+      {/* 我的笔记 */}
       <div style={secTitle}>我的笔记</div>
       <div>
         <textarea

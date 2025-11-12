@@ -1,32 +1,25 @@
 // src/store.ts
 import { create } from "zustand";
 
-/** ========= 公共类型 ========= */
+/** ========= 基础类型 ========= */
 
-export type PriceLine = { id: string; price: number; title?: string };
+export type PriceLine = {
+  id: string;
+  price: number;
+  title?: string;
+};
 
 export type Note = {
   id: string;
-  ts: string; // ISO string，SymbolDetail 用 ts 渲染时间
+  ts: string; // ISO 字符串，SymbolDetail 用于显示时间
   text: string;
 };
 
-export type MarketPoint = {
-  ts?: string;
-  date?: string;
-  name?: string;
-  value?: number;
-  [k: string]: any;
-};
-
 export type MarketSnapshot = {
-  asof?: string;
-  last_bar_date?: string;
-  rules_version?: string;
+  asof?: string; // universe 计算口径日期
+  last_bar_date?: string; // 可选：最后一根K线日期
+  rules_version?: string; // 规则版本号（由后端写入）
   status?: "OK" | "NO_DATA" | "ERROR";
-  indices?: MarketPoint[];
-  breadth?: MarketPoint[];
-  [k: string]: any;
 };
 
 export type StockItem = {
@@ -36,24 +29,16 @@ export type StockItem = {
   market?: string;
   is_st?: boolean;
 
-  // 推荐 / 评分
-  reco?: string;
-  score?: number; // 0..100
-  bucket?: string;
+  // 多因子通过标记（由 export_universe.py 写入）
+  pass_liquidity_v2?: boolean;      // F2: 高流动性
+  pass_price_compliance?: boolean;  // F3: 合理价格区间
+  pass_trend?: boolean;             // F5: 多头趋势结构
+  pass_volume_confirm?: boolean;    // F4: 放量确认
+  pass_industry_leader?: boolean;   // F6: 强板块龙头
 
-  // 多因子通过标记（由后端 export_universe 写入）
-  pass_liquidity_v2?: boolean; // F1
-  pass_price_compliance?: boolean; // F2
-  pass_trend?: boolean; // F3
-  pass_volume_confirm?: boolean; // F4
-  pass_industry_leader?: boolean; // F5
-  pass_rs?: boolean; // F6
-  pass_breakout?: boolean; // F7
-  pass_quality?: boolean; // F8
-  pass_risk?: boolean; // F9
+  last_date?: string;               // 该票数据截止日期
 
-  // 其他字段透传
-  last_date?: string;
+  // 允许透传 features 等调试字段，不强约束
   [k: string]: any;
 };
 
@@ -61,75 +46,61 @@ export type StockItem = {
  * FilterPanel / ResultList / SymbolDetail 共用
  */
 
-export type FKey =
-  | "F1"
-  | "F2"
-  | "F3"
-  | "F4"
-  | "F5"
-  | "F6"
-  | "F7"
-  | "F8"
-  | "F9";
+export type FactorKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6";
 
 export type FilterState = {
-  q: string;
-} & {
-  [K in FKey]?: boolean;
-};
+  q: string; // 搜索关键字（代码 / 名称）
+} & Partial<Record<FactorKey, boolean>>;
 
 type FactorCfg = {
-  key: FKey;
+  key: FactorKey;
   label: string;
   test: (s: StockItem) => boolean;
 };
 
 export const FACTOR_CONFIG: FactorCfg[] = [
-  // F1：剔除风险股 / ST
+  // F1：剔除 ST 股
   {
     key: "F1",
-    label: "剔除ST股",
-    // 名称带 ST 的视为不通过；没有 is_st 字段时默认通过
+    label: "F1: 剔除ST股",
+    // is_st === true 的剔除；缺失视为正常
     test: (s) => s.is_st !== true,
   },
 
-  // F2：高流动性（保证进得去出得来）
+  // F2：高流动性
   {
     key: "F2",
-    label: "高流动性",
-    // 后端已根据「近 60 日成交额 / 换手率」打好 pass_liquidity_v2
-    // !== false：缺失时默认视作不通过可以根据你实际口径调整
+    label: "F2: 高流动性",
+    // 后端根据成交额 & 换手率写入 pass_liquidity_v2
+    // 这里只接受明确 false 为不通过，缺失可以按需要调整
     test: (s) => s.pass_liquidity_v2 !== false,
   },
 
-  // F3：合理价格区间（3~80 元等）
+  // F3：合理价格区间
   {
     key: "F3",
-    label: "合理价格区间",
-    // 对应你说明里的价格区间规则
+    label: "F3: 合理价格区间",
     test: (s) => s.pass_price_compliance !== false,
   },
 
   // F4：放量确认
   {
     key: "F4",
-    label: "放量确认",
-    // 只有明确 true 才算通过（与说明里“量价都满足才通过”一致）
+    label: "F4: 放量确认",
     test: (s) => s.pass_volume_confirm === true,
   },
 
   // F5：多头趋势结构
   {
     key: "F5",
-    label: "多头趋势结构",
+    label: "F5: 多头趋势结构",
     test: (s) => s.pass_trend === true,
   },
 
   // F6：强板块龙头
   {
     key: "F6",
-    label: "强板块龙头",
-    // 后端已根据行业强度 + 排名给出 pass_industry_leader
+    label: "F6: 强板块龙头",
     test: (s) => s.pass_industry_leader === true,
   },
 ];
@@ -146,7 +117,7 @@ export type KLineBar = {
   [k: string]: any;
 };
 
-/** ========= 本地存储工具 ========= */
+/** ========= 本地存储 ========= */
 
 const LS_KEY_NOTES = "ta_symbol_notes_v1";
 const LS_KEY_PLINES = "ta_price_lines_v1";
@@ -161,7 +132,7 @@ function safeParseJSON<T>(raw: string | null): T | null {
 }
 
 /** notes: { [symbol]: Note[] } */
-function loadNotes() {
+function loadNotes(): Record<string, Note[]> {
   if (typeof window === "undefined") return {};
   return safeParseJSON<Record<string, Note[]>>(
     window.localStorage.getItem(LS_KEY_NOTES)
@@ -177,7 +148,7 @@ function saveNotes(data: Record<string, Note[]>) {
 }
 
 /** priceLines: { [symbol]: PriceLine[] } */
-function loadPriceLines() {
+function loadPriceLines(): Record<string, PriceLine[]> {
   if (typeof window === "undefined") return {};
   return safeParseJSON<Record<string, PriceLine[]>>(
     window.localStorage.getItem(LS_KEY_PLINES)
@@ -217,12 +188,15 @@ type AppState = {
 
   /** —— 动作 —— */
 
+  // 筛选
   setFilter: (patch: Partial<FilterState>) => void;
   resetFilter: () => void;
-  toggleFlag: (key: FKey) => void;
+  toggleFlag: (key: FactorKey) => void;
 
+  // 选中标的
   setSelectedSymbol: (symbol: string | null) => void;
 
+  // 数据加载
   loadMarket: () => Promise<void>;
   loadKline: (symbol: string) => Promise<void>;
 
@@ -243,8 +217,7 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   filter: {
     q: "",
-    // 默认可以只开关键 F1，高阶按你需求调
-    F1: true,
+    F1: true, // 默认只开 F1：先排除 ST
   },
 
   selectedSymbol: null,
@@ -254,9 +227,13 @@ export const useDataStore = create<AppState>((set, get) => ({
   priceLines: loadPriceLines(),
 
   /** —— 筛选 —— */
+
   setFilter: (patch) =>
     set((state) => ({
-      filter: { ...state.filter, ...patch },
+      filter: {
+        ...state.filter,
+        ...patch,
+      },
     })),
 
   resetFilter: () =>
@@ -264,31 +241,27 @@ export const useDataStore = create<AppState>((set, get) => ({
       filter: { q: "", F1: true },
     }),
 
-    toggleFlag: (key: FKey) =>
-      set((state) => {
-        const current = !!state.filter[key];
-        return {
-          filter: {
-            ...state.filter,
-            [key]: !current,
-          },
-        };
-      }),
+  toggleFlag: (key: FactorKey) =>
+    set((state) => {
+      const current = !!state.filter[key];
+      return {
+        filter: {
+          ...state.filter,
+          [key]: !current,
+        },
+      };
+    }),
 
   /** —— 当前选中 —— */
-  setSelectedSymbol: (symbol) =>
-    set({ selectedSymbol: symbol }),
+
+  setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
 
   /** —— 加载 universe / market —— */
+
   loadMarket: async () => {
-    // 避免 SSR 报错
     if (typeof window === "undefined") return;
 
-    const tryUrls = [
-      "/out/universe.json",
-      "/universe.json",
-    ];
-
+    const tryUrls = ["/out/universe.json", "/universe.json"];
     let data: any = null;
 
     for (const url of tryUrls) {
@@ -310,31 +283,28 @@ export const useDataStore = create<AppState>((set, get) => ({
       return;
     }
 
-    // 支持两种结构：
-    // 1) { asof, last_bar_date, rules_version, list: [...] }
-    // 2) 直接 [ ...StockItem ]
     let stocks: StockItem[] = [];
-    const market: MarketSnapshot = {
-      status: "OK",
-    };
+    const market: MarketSnapshot = { status: "OK" };
 
+    // 结构 1: 直接是数组
     if (Array.isArray(data)) {
       stocks = data as StockItem[];
-    } else if (Array.isArray(data.list)) {
+    }
+    // 结构 2: { asof, last_bar_date, rules_version, list: [...] }
+    else if (Array.isArray(data.list)) {
       stocks = data.list as StockItem[];
       if (data.asof) market.asof = data.asof;
       if (data.last_bar_date) market.last_bar_date = data.last_bar_date;
       if (data.rules_version) market.rules_version = data.rules_version;
-    } else {
-      // fallback：尝试从 data.stocks 读取
+    }
+    // 兜底：尝试从 data.stocks / data.items 等读取
+    else {
       if (Array.isArray(data.stocks)) {
         stocks = data.stocks as StockItem[];
       }
       market.asof = data.asof || data.date || market.asof;
-      market.last_bar_date =
-        data.last_bar_date || market.last_bar_date;
-      market.rules_version =
-        data.rules_version || market.rules_version;
+      market.last_bar_date = data.last_bar_date || market.last_bar_date;
+      market.rules_version = data.rules_version || market.rules_version;
     }
 
     if (!stocks.length) {
@@ -345,22 +315,22 @@ export const useDataStore = create<AppState>((set, get) => ({
   },
 
   /** —— 加载单个 symbol 的日K（CSV） —— */
+
   loadKline: async (symbol: string) => {
     if (!symbol) return;
+
     const { klineMap } = get();
     if (klineMap[symbol]?.length) return; // 已有缓存
 
     if (typeof window === "undefined") return;
 
-    const tryUrls = [
-      `/data/${symbol}.csv`,
-      `/out/${symbol}.csv`,
-    ];
+    const tryUrls = [`/data/${symbol}.csv`, `/out/${symbol}.csv`];
 
     for (const url of tryUrls) {
       try {
         const res = await fetch(url, { cache: "no-cache" });
         if (!res.ok) continue;
+
         const txt = await res.text();
         const lines = txt.trim().split(/\r?\n/);
         if (lines.length <= 1) continue;
@@ -385,8 +355,7 @@ export const useDataStore = create<AppState>((set, get) => ({
             high: Number(a[iHigh]),
             low: Number(a[iLow]),
             close: Number(a[iClose]),
-            volume:
-              iVol >= 0 ? Number(a[iVol]) || undefined : undefined,
+            volume: iVol >= 0 ? Number(a[iVol]) || undefined : undefined,
           }));
 
         set((state) => ({
@@ -402,7 +371,8 @@ export const useDataStore = create<AppState>((set, get) => ({
     }
   },
 
-  /** —— 笔记相关 —— */
+  /** —— 笔记 —— */
+
   getNotes: (symbol: string) => {
     if (!symbol) return [];
     const { notesMap } = get();
@@ -411,7 +381,9 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   addNote: (symbol: string, text: string) => {
     if (!symbol || !text.trim()) return;
+
     const trimmed = text.trim();
+
     set((state) => {
       const prev = state.notesMap[symbol] || [];
       const nextNote: Note = {
@@ -419,10 +391,12 @@ export const useDataStore = create<AppState>((set, get) => ({
         ts: new Date().toISOString(),
         text: trimmed,
       };
+
       const nextMap = {
         ...state.notesMap,
         [symbol]: [nextNote, ...prev],
       };
+
       saveNotes(nextMap);
       return { ...state, notesMap: nextMap };
     });
@@ -430,17 +404,20 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   deleteNote: (symbol: string, id: string) => {
     if (!symbol || !id) return;
+
     set((state) => {
       const prev = state.notesMap[symbol];
       if (!prev) return state;
+
       const nextList = prev.filter((n) => n.id !== id);
       const nextMap = { ...state.notesMap, [symbol]: nextList };
+
       saveNotes(nextMap);
       return { ...state, notesMap: nextMap };
     });
   },
 
-  /** —— 水平线相关 —— */
+  /** —— 水平线 —— */
 
   getLines: (symbol: string) => {
     if (!symbol) return [];
@@ -450,11 +427,13 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   addLine: (symbol: string, price: number) => {
     if (!symbol || !Number.isFinite(price)) return;
+
     const rounded = Number(price.toFixed(2));
 
     set((state) => {
       const prev = state.priceLines[symbol] || [];
-      // 同一价格只画一次（按两位小数）
+
+      // 同一价格只画一次
       if (prev.some((pl) => Number(pl.price.toFixed(2)) === rounded)) {
         return state;
       }
@@ -469,18 +448,21 @@ export const useDataStore = create<AppState>((set, get) => ({
         ...state.priceLines,
         [symbol]: [...prev, nextLine],
       };
-      savePriceLines(nextAll);
 
+      savePriceLines(nextAll);
       return { ...state, priceLines: nextAll };
     });
   },
 
   clearLines: (symbol: string) => {
     if (!symbol) return;
+
     set((state) => {
       if (!state.priceLines[symbol]) return state;
+
       const nextAll = { ...state.priceLines };
       delete nextAll[symbol];
+
       savePriceLines(nextAll);
       return { ...state, priceLines: nextAll };
     });

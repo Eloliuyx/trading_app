@@ -12,45 +12,49 @@ import pandas as pd
 
 """
 ============================================================
-Trading_App universe 导出脚本（F1-F6 专用版本）
+Trading_App universe 导出脚本（F1-F6 精简版）
 ============================================================
 
 目标：
 - 从本地 CSV 日线数据构建 universe.json；
-- 只输出与当前前端版本一致的关键信息：
-    F1: 剔除风险股/ST          -> is_st (由前端规则使用)
-    F2: 强流动性               -> pass_liquidity_v2
-    F3: 合理价格区间           -> pass_price_compliance
-    F4: 放量确认               -> pass_volume_confirm
-    F5: 多头趋势结构           -> pass_trend
-    F6: 强板块龙头             -> pass_industry_leader
-- 其他数值指标作为 features 提供给前端展示 / debug 使用；
-- 不再输出 F7-F9、pass_rs_market_strong 等未使用字段；
-- 缺数据一律 fail-closed，保持确定性与可解释性。
+- 与前端当前使用的字段保持一致，仅输出所需字段：
+
+    F1: 剔除 ST（由 is_st 提供信息，由上层使用）
+    F2: 强流动性           -> pass_liquidity_v2
+    F3: 合理价格区间       -> pass_price_compliance
+    F4: 放量确认           -> pass_volume_confirm
+    F5: 多头趋势结构       -> pass_trend
+    F6: 强板块龙头         -> pass_industry_leader
+
+约定（非常重要）：
+- CSV 来自 update_data.py（TuShare）且已标准化，包含：
+    Date, Open, High, Low, Close, Volume, Amount, TurnoverRate
+- Volume 单位：手
+- Amount 单位：元（已在 update_data.py 中将 tushare.amount(千元) * 1000，
+                  并在缺失时用 Volume * Close * 100 近似补齐）
+- 本脚本不再处理单位换算和缺失补齐，若关键数据缺失则该标的 fail-closed。
+- features 字段用于前端展示与调试。
 """
 
+# ------------------------------------------------------------
+# 路径约定：仅使用 repo 根目录下的 public
+# ------------------------------------------------------------
+
 ROOT = Path(__file__).resolve().parents[1]  # .../backend
-CANDIDATES = [
-    ROOT.parent / "frontend" / "public",
-    ROOT.parent / "public",
-]
+PUBLIC_CANDIDATE = ROOT.parent / "public"
 
 
 def pick_public() -> Path:
     """
     选择实际使用的 PUBLIC 目录：
-    - 优先 frontend/public
-    - 其次 repo 根目录下的 public
+    - 使用 repo 根目录下的 public
     - 要求存在 data/metadata/symbols.csv
     """
-    for p in CANDIDATES:
-        meta = p / "data" / "metadata" / "symbols.csv"
-        if meta.exists():
-            print(f"[export_universe] using PUBLIC dir: {p}")
-            return p
-    raise FileNotFoundError(
-        "symbols.csv not found under frontend/public or public"
-    )
+    meta = PUBLIC_CANDIDATE / "data" / "metadata" / "symbols.csv"
+    if meta.exists():
+        print(f"[export_universe] using PUBLIC dir: {PUBLIC_CANDIDATE}")
+        return PUBLIC_CANDIDATE
+    raise FileNotFoundError("symbols.csv not found under public")
 
 
 PUBLIC = pick_public()
@@ -105,8 +109,7 @@ def read_symbols(meta_path: Path) -> pd.DataFrame:
     读取标的信息（symbols.csv）并标准化字段：
     - symbol, name, industry, market
     - is_st: 名称包含 "ST"
-    - is_delisting, is_suspended: 如存在则读取，否则 False
-    - float_shares: 流通股本（若存在相应列）
+    - float_shares: 若存在相关列则读入，否则为 NaN
     """
     df = pd.read_csv(meta_path)
     cols = {c.lower(): c for c in df.columns}
@@ -135,18 +138,7 @@ def read_symbols(meta_path: Path) -> pd.DataFrame:
     upper_name = out["name"].str.upper()
     out["is_st"] = upper_name.str.contains("ST")
 
-    # 退市 & 停牌标记（非 F1-F6 必要，但保留供前端展示）
-    if "is_delisting" in cols:
-        out["is_delisting"] = df[cols["is_delisting"]].astype(bool)
-    else:
-        out["is_delisting"] = False
-
-    if "is_suspended" in cols:
-        out["is_suspended"] = df[cols["is_suspended"]].astype(bool)
-    else:
-        out["is_suspended"] = False
-
-    # 流通股本（预留给换手率等计算。当前 F2 主要使用 TurnoverRate）
+    # 流通股本（若存在）
     float_cols = [
         "float_shares",
         "float_share",
@@ -166,175 +158,6 @@ def read_symbols(meta_path: Path) -> pd.DataFrame:
         out["float_shares"] = np.nan
 
     return out
-
-
-# ============================================================
-# 成交额推断（用于 F2 / 量能相关）
-# ============================================================
-
-AMOUNT_CANDIDATES = ["Amount", "amount", "成交额", "成交额(元)", "Turnover", "turnover"]
-
-
-def parse_amount_if_exists(df: pd.DataFrame) -> Optional[pd.Series]:
-    """
-    若存在成交额列：
-    - 清洗千分位符号；
-    - 判断单位（若整体偏小则视为“千元”，乘以1000）；
-    - 返回统一到「元」的 Series。
-    """
-    col = None
-    for c in AMOUNT_CANDIDATES:
-        if c in df.columns:
-            col = c
-            break
-    if col is None:
-        return None
-
-    raw = (
-        df[col]
-        .astype(str)
-        .str.replace(",", "", regex=False)
-        .str.replace(" ", "", regex=False)
-        .str.replace("\u00a0", "", regex=False)
-    )
-    amt = pd.to_numeric(raw, errors="coerce")
-
-    if not amt.notna().any():
-        return None
-
-    # 若 95 分位 < 1e9，视为“千元”为单位 → 乘以 1000
-    q95 = np.nanpercentile(amt.to_numpy(dtype=float), 95)
-    if q95 < 1e9:
-        amt = amt * 1_000.0
-
-    return amt
-
-
-def infer_amount_from_cv(df: pd.DataFrame) -> pd.Series:
-    """
-    无成交额列时，使用 Close × Volume 估算成交额（粗略）：
-    - 优先假设 Volume 为“手”，不合理时退回为“股”。
-    """
-    for c in ["Close", "Volume"]:
-        if df[c].dtype == "object":
-            df[c] = (
-                df[c]
-                .astype(str)
-                .str.replace(",", "", regex=False)
-                .str.replace(" ", "", regex=False)
-            )
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # 初始假设 Volume 为“手”：元 ≈ Close × Volume × 100
-    est = df["Close"] * df["Volume"] * 100.0
-
-    q95_amt = np.nanpercentile(est.to_numpy(dtype=float), 95) if est.notna().any() else 0.0
-    q95_vol = (
-        np.nanpercentile(df["Volume"].to_numpy(dtype=float), 95)
-        if df["Volume"].notna().any()
-        else 0.0
-    )
-
-    # 若估算过大，尝试假设 Volume 已是“股”
-    if q95_amt > 1e11 or q95_vol > 1e9:
-        est = df["Close"] * df["Volume"] * 1.0
-
-    return pd.to_numeric(est, errors="coerce")
-
-
-# ============================================================
-# 单股票数据载入 & 特征计算
-# ============================================================
-
-def load_one(symbol: str, cutoff: Optional[str]) -> Optional[pd.DataFrame]:
-    """
-    读取单个 symbol 的日线 CSV，并计算：
-    - MA5 / MA13 / MA39
-    - VMA10 / VMA20 / VMA50
-    - VR（VMA10 / VMA50）
-    - VOL_RATIO20（今日量 / VMA20）
-    - AMT60（60日均成交额）
-    - RS20（20日相对强度）
-    - HIGH20 / LOW20（20日高低）
-    - ATR14
-    要求样本长度 >= 60，否则返回 None（fail-closed）。
-    """
-    path = DATA / f"{symbol}.csv"
-    if not path.exists():
-        return None
-
-    df = pd.read_csv(path)
-    if "Date" not in df.columns or "Close" not in df.columns or "Volume" not in df.columns:
-        return None
-
-    # 排序 + 截止日期（用于回测）
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
-    if cutoff:
-        df = df[df["Date"] <= cutoff]
-
-    # 转数值
-    for c in ["Open", "High", "Low", "Close", "Volume"]:
-        if c in df.columns and df[c].dtype == "object":
-            df[c] = (
-                df[c]
-                .astype(str)
-                .str.replace(",", "", regex=False)
-                .str.replace(" ", "", regex=False)
-            )
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # TurnoverRate（如存在，视为小数；否则 NaN）
-    if "TurnoverRate" in df.columns:
-        df["TurnoverRate"] = pd.to_numeric(df["TurnoverRate"], errors="coerce")
-    else:
-        df["TurnoverRate"] = np.nan
-
-    # 成交额（元）
-    amt = parse_amount_if_exists(df)
-    if amt is None or amt.isna().all():
-        amt = infer_amount_from_cv(df)
-    df = df.assign(AmountY=amt)
-
-    # 样本不足 60 日，不纳入本次 universe
-    if len(df) < 60:
-        return None
-
-    # 均线
-    df["MA5"] = ma(df["Close"], 5)
-    df["MA13"] = ma(df["Close"], 13)
-    df["MA39"] = ma(df["Close"], 39)
-
-    # 量能相关
-    df["VMA10"] = ma(df["Volume"], 10)
-    df["VMA20"] = ma(df["Volume"], 20)
-    df["VMA50"] = ma(df["Volume"], 50)
-    df["VR"] = df["VMA10"] / df["VMA50"]           # 短期 vs 中期
-    df["VOL_RATIO20"] = df["Volume"] / df["VMA20"]  # 今日 vs 20日均量
-
-    # 60日均成交额（元）
-    df["AMT60"] = ma(df["AmountY"], 60)
-
-    # RS20：20日相对强度
-    df["RS20"] = df["Close"] / df["Close"].shift(20) - 1.0
-
-    # 20日高低（用于部分强度 / 波动率指标）
-    df["HIGH20"] = df["High"].rolling(20, min_periods=20).max()
-    df["LOW20"] = df["Low"].rolling(20, min_periods=20).min()
-
-    # ATR14：波动率参考（当前 F1-F6 未直接使用，保留在 features）
-    high = df["High"]
-    low = df["Low"]
-    close = df["Close"]
-    prev_close = close.shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    df["ATR14"] = tr.rolling(14, min_periods=14).mean()
-
-    return df
 
 
 def sanitize_for_json(obj: Any) -> Any:
@@ -365,6 +188,111 @@ def sanitize_for_json(obj: Any) -> Any:
         return [sanitize_for_json(v) for v in obj]
 
     return obj
+
+
+# ============================================================
+# 单股票数据载入 & 特征计算
+# ============================================================
+
+def load_one(symbol: str, cutoff: Optional[str]) -> Optional[pd.DataFrame]:
+    """
+    读取单个 symbol 的日线 CSV，并计算技术指标。
+
+    依赖前置条件：
+    - CSV 已由 update_data.py 规范化：
+        Date, Open, High, Low, Close, Volume, Amount(元), TurnoverRate
+    - 若关键数据严重缺失，则返回 None（fail-closed）。
+
+    计算：
+    - MA5 / MA13 / MA39
+    - VMA10 / VMA20 / VMA50
+    - VR（VMA10 / VMA50）
+    - VOL_RATIO20（今日量 / VMA20）
+    - AMT60（60日均成交额，基于 Amount，单位：元）
+    - RS20（20日相对强度）
+    - HIGH20 / LOW20（20日高低）
+    - ATR14
+    """
+    path = DATA / f"{symbol}.csv"
+    if not path.exists():
+        return None
+
+    df = pd.read_csv(path)
+
+    required = ["Date", "Close", "Volume", "Amount"]
+    if any(c not in df.columns for c in required):
+        return None
+
+    # 日期 & 截止
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date")
+    if cutoff:
+        df = df[df["Date"] <= cutoff]
+
+    # 转数值
+    for c in ["Open", "High", "Low", "Close", "Volume", "Amount"]:
+        if c in df.columns and df[c].dtype == "object":
+            df[c] = (
+                df[c]
+                .astype(str)
+                .str.replace(",", "", regex=False)
+                .str.replace(" ", "", regex=False)
+            )
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # TurnoverRate（如存在，视为小数；否则 NaN）
+    if "TurnoverRate" in df.columns:
+        df["TurnoverRate"] = pd.to_numeric(df["TurnoverRate"], errors="coerce")
+    else:
+        df["TurnoverRate"] = np.nan
+
+    # 样本不足 60 日，不纳入本次 universe
+    if len(df) < 60:
+        return None
+
+    # 成交额（元），此处假定 update_data.py 已确保为“元”且大部分存在。
+    df["AmountY"] = pd.to_numeric(df["Amount"], errors="coerce")
+
+    # 若整条时间序列的 AmountY 全为 NaN 或非正数，则视为数据不可信，fail-closed
+    if df["AmountY"].isna().all() or (df["AmountY"] <= 0).all():
+        print(f"[warn] {symbol}: invalid Amount series, skip in universe")
+        return None
+
+    # 均线
+    df["MA5"] = ma(df["Close"], 5)
+    df["MA13"] = ma(df["Close"], 13)
+    df["MA39"] = ma(df["Close"], 39)
+
+    # 量能相关
+    df["VMA10"] = ma(df["Volume"], 10)
+    df["VMA20"] = ma(df["Volume"], 20)
+    df["VMA50"] = ma(df["Volume"], 50)
+    df["VR"] = df["VMA10"] / df["VMA50"]
+    df["VOL_RATIO20"] = df["Volume"] / df["VMA20"]
+
+    # 60日均成交额（元）
+    df["AMT60"] = ma(df["AmountY"], 60)
+
+    # RS20：20日相对强度
+    df["RS20"] = df["Close"] / df["Close"].shift(20) - 1.0
+
+    # 20日高低
+    df["HIGH20"] = df["High"].rolling(20, min_periods=20).max()
+    df["LOW20"] = df["Low"].rolling(20, min_periods=20).min()
+
+    # ATR14：波动率参考
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    prev_close = close.shift(1)
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    df["ATR14"] = tr.rolling(14, min_periods=14).mean()
+
+    return df
 
 
 # ============================================================
@@ -418,9 +346,13 @@ def main(cutoff: Optional[str]) -> None:
 
         # 元信息
         is_st = bool(r.get("is_st", False))
-        is_delisting = bool(r.get("is_delisting", False))
-        is_suspended = bool(r.get("is_suspended", False))
-        float_shares = nz(r.get("float_shares", 0.0), 0.0)
+        float_shares = r.get("float_shares", np.nan)
+        if isinstance(float_shares, (str, bytes)):
+            try:
+                float_shares = float(float_shares)
+            except Exception:
+                float_shares = np.nan
+        float_shares = float(float_shares) if not (pd.isna(float_shares)) else None
 
         # TurnoverRate 时间序列（如存在）
         if "TurnoverRate" in df.columns:
@@ -433,7 +365,8 @@ def main(cutoff: Optional[str]) -> None:
 
         # 只在最近 180 日中有足够样本时使用换手率
         if not tr_all.empty:
-            last_tr = float(tr_all.iloc[-1]) if not math.isnan(float(tr_all.iloc[-1])) else float("nan")
+            last_tr_raw = tr_all.iloc[-1]
+            last_tr = float(last_tr_raw) if not math.isnan(float(last_tr_raw)) else float("nan")
             if not math.isnan(last_tr):
                 recent = tr_all.tail(180)
                 valid_recent = recent[recent.notna()]
@@ -444,13 +377,13 @@ def main(cutoff: Optional[str]) -> None:
         # ---------- F2: 强流动性 ----------
         def pass_liquidity_v2_func() -> bool:
             """
-            强流动性条件：
-            - 60日均成交额 >= 500万
+            强流动性条件（全部使用“元”口径）：
+            - 60日均成交额 >= 5000 万元
             - 60日均换手率 >= 0.8%（0.008）
             - 当日换手率 >= 0.6%（0.006）
             条件任一缺失 -> False
             """
-            if amt60 < 5_000_000:
+            if amt60 < 50_000_000:
                 return False
             if not (isinstance(turnover60_avg, (int, float)) and isinstance(turnover_d, (int, float))):
                 return False
@@ -471,10 +404,10 @@ def main(cutoff: Optional[str]) -> None:
         def pass_trend_func() -> bool:
             """
             F5 多头趋势结构：
-            - MA5, MA13, MA39, MA5_shift_5, Close 均为有效数值
             - 多头排列: MA5 >= MA13 >= MA39
             - Close > MA13
-            - (MA5 - MA5_shift_5) / MA5_shift_5 >= 1.5%
+            - MA5 相比 5 日前抬升至少 1.5%
+            - 所有参与判断的值必须有效
             """
             vals = [ma5, ma13, ma39, ma5_shift_5, close]
             for v in vals:
@@ -526,9 +459,7 @@ def main(cutoff: Optional[str]) -> None:
                 "industry": str(r["industry"]),
                 "market": str(r["market"]),
                 "is_st": is_st,
-                "is_delisting": is_delisting,
-                "is_suspended": is_suspended,
-                "float_shares": float_shares if float_shares > 0 else None,
+                "float_shares": float_shares if float_shares and float_shares > 0 else None,
                 "last_date": str(last["Date"].date()),
                 "amt60_avg": amt60,
                 # F2/F3/F5 顶层布尔字段（前端直接读取）
@@ -540,7 +471,7 @@ def main(cutoff: Optional[str]) -> None:
         )
 
     if not rows:
-        raise RuntimeError("没有可用标的（CSV 太短或列缺失）")
+        raise RuntimeError("没有可用标的（CSV 太短或关键列缺失）")
 
     # ---------- 二次遍历：基于全市场 & 行业的衍生特征（F4, F6） ----------
     dfu = pd.DataFrame(
@@ -565,7 +496,7 @@ def main(cutoff: Optional[str]) -> None:
     dfu["pct_vr"] = percent_rank(base_vr)
     dfu["pct_rs20"] = percent_rank(dfu["rs20_raw"])
 
-    # ---------- F4: 放量确认（pass_volume_confirm） ----------
+    # ---------- F4: 放量确认 ----------
     # 条件：
     #   1) 量能进入全市场前 40%: pct_vr >= 0.6
     #      或 自身放量明显: vol_ratio20 >= 1.2
@@ -573,7 +504,7 @@ def main(cutoff: Optional[str]) -> None:
     dfu["volume_boost"] = (dfu["pct_vr"] >= 0.6) | (dfu["vol_ratio20"] >= 1.2)
     dfu["pass_volume_confirm"] = dfu["volume_boost"] & dfu["price_ok"].fillna(False)
 
-    # ---------- F6: 强板块龙头（pass_industry_leader） ----------
+    # ---------- F6: 强板块龙头 ----------
     # 行业强度（RS20 中位数）
     ind_strength = (
         dfu.groupby("industry", as_index=False)["rs20_raw"]
@@ -612,7 +543,7 @@ def main(cutoff: Optional[str]) -> None:
         row = dfu.loc[sym]
         feat = it.get("features") or {}
 
-        # 数值特征回写到 features，便于前端展示/调试（可选使用）
+        # 数值特征回写到 features（便于前端展示/调试）
         for k in [
             "pct_amt",
             "pct_vr",
@@ -646,7 +577,6 @@ def main(cutoff: Optional[str]) -> None:
         asof = ""
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-
     payload = {"asof": asof, "list": rows}
     payload = sanitize_for_json(payload)
 

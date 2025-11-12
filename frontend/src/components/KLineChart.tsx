@@ -54,13 +54,14 @@ const KLineChart: React.FC = () => {
   const selectedSymbol = useDataStore((s) => s.selectedSymbol);
   const klineMap = useDataStore((s) => s.klineMap || {});
   const priceLines = useDataStore((s) => s.priceLines || {});
-
   const loadKline = useDataStore((s) => s.loadKline);
   const addLine = useDataStore((s) => s.addLine);
   const clearLines = useDataStore((s) => s.clearLines);
 
-  /** 从点击事件估价格 */
-  const getPriceFromClick = (param: MouseEventParams<Time>): number | null => {
+  // 从点击事件估算价格
+  const getPriceFromClick = (
+    param: MouseEventParams<Time>
+  ): number | null => {
     const chart = chartRef.current;
     const series = seriesRef.current;
     const anyParam = param as any;
@@ -68,6 +69,7 @@ const KLineChart: React.FC = () => {
     const point = anyParam?.point;
     if (!point) return null;
 
+    // 优先从 seriesData 读取收盘价
     if (anyParam.seriesData) {
       const d =
         anyParam.seriesData.get?.(series as any) ??
@@ -75,6 +77,7 @@ const KLineChart: React.FC = () => {
       if (d && typeof d.close === "number") return d.close;
     }
 
+    // 回退：用坐标换算价格
     const psFromSeries: any = (series as any).priceScale?.();
     if (psFromSeries?.coordinateToPrice) {
       const p = psFromSeries.coordinateToPrice(point.y);
@@ -90,7 +93,7 @@ const KLineChart: React.FC = () => {
     return null;
   };
 
-  /** 初始化图表 & 点击事件 */
+  // 初始化图表（只执行一次）
   useEffect(() => {
     if (!containerRef.current || chartRef.current) return;
 
@@ -120,7 +123,6 @@ const KLineChart: React.FC = () => {
     chartRef.current = chart;
     seriesRef.current = series;
 
-    /** 尺寸自适应：窗口变化 + 容器变化 */
     const applySize = () => {
       if (!containerRef.current || !chartRef.current) return;
       const { clientWidth, clientHeight } = containerRef.current;
@@ -163,23 +165,27 @@ const KLineChart: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 根据选中标的加载K线 */
+  // 选中标的变化时，请求加载其日K
   useEffect(() => {
     selectedSymbolRef.current = selectedSymbol || null;
-    if (selectedSymbol) loadKline(selectedSymbol);
+    if (selectedSymbol) {
+      loadKline(selectedSymbol);
+    }
   }, [selectedSymbol, loadKline]);
 
-  /** symbol / kline / priceLines 变化时重绘 */
+  // symbol / k线数据 / 水平线变化时，重绘
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
     if (!chart || !series) return;
 
-    // 清线
+    // 清除旧的水平线
     lineMapRef.current.forEach((pl) => {
       try {
         series.removePriceLine(pl);
-      } catch {}
+      } catch {
+        // ignore
+      }
     });
     lineMapRef.current.clear();
 
@@ -198,8 +204,8 @@ const KLineChart: React.FC = () => {
 
     const n = bars.length;
     if (n > 80) {
-      const from = bars[n - 80].time as any;
-      const to = bars[n - 1].time as any;
+      const from = bars[n - 80].time as Time;
+      const to = bars[n - 1].time as Time;
       chart.timeScale().setVisibleRange({ from, to });
     } else {
       chart.timeScale().fitContent();
@@ -207,11 +213,9 @@ const KLineChart: React.FC = () => {
 
     const lines: PriceLine[] = priceLines[selectedSymbol] || [];
     lines.forEach((l) => {
-      const id =
-        l.id || `pl_${selectedSymbol}_${l.price.toFixed(2)}`;
+      const id = l.id || `pl_${selectedSymbol}_${l.price.toFixed(2)}`;
       const pl = series.createPriceLine({
         price: l.price,
-        // 深蓝色线，略粗，单侧标签
         color: "#1d4ed8",
         lineWidth: 2,
         lineStyle: LineStyle.Dashed,

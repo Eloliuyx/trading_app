@@ -96,6 +96,7 @@ const MarketHome: React.FC = () => {
     loadMarket: s.loadMarket,
   }));
 
+  // 页面首次渲染时自动加载 universe.json。
   useEffect(() => {
     loadMarket();
   }, [loadMarket]);

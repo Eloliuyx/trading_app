@@ -11,8 +11,22 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+"""
+从 TuShare 增量更新本地日线数据 CSV。
+
+输出格式（供 export_universe.py 使用）：
+- Date:         交易日期（datetime）
+- Open,High,Low,Close: 收盘价等（float）
+- Volume:       成交量（手，float）
+- Amount:       成交额（元，float）= tushare.daily.amount * 1000
+- TurnoverRate: 换手率（小数，0.01 = 1%），可能为 NaN
+
+所有 CSV 写入：项目根 /public/data
+并维护一个 manifest(data_index.json) 记录每个 symbol 最新日期，便于只更新落后标的。
+"""
+
 # === 路径约定：默认写入项目根 /public/data ===
-PROJ = Path(__file__).resolve().parents[2]
+PROJ = Path(__file__).resolve().parents[2]   # .../backend/core -> backend -> repo_root
 PUBLIC = PROJ / "public"
 DEFAULT_OUT = PUBLIC / "data"
 DEFAULT_MANIFEST = PUBLIC / "data_index.json"
@@ -43,6 +57,7 @@ def read_existing(csv_path: Path) -> Optional[pd.DataFrame]:
         return None
     df = pd.read_csv(csv_path)
     need = ["Date", "Open", "High", "Low", "Close", "Volume"]
+    # Amount / TurnoverRate 缺失可以后补，这里不强制
     miss = [c for c in need if c not in df.columns]
     if miss:
         return None
@@ -112,13 +127,12 @@ def update_manifest_entry(manifest_path: Path, sym: str, new_last_day: str) -> N
         save_manifest(manifest_path, m)
 
 
-# ----------------- Tushare 实现 -----------------
+# ----------------- Tushare 客户端 -----------------
 def _tushare_client(token: Optional[str]):
     import tushare as ts
 
-    # 优先用命令行 --token
+    # 优先用命令行 --token，再尝试环境变量
     if not token:
-        # 再尝试环境变量
         token = os.getenv("TUSHARE_TOKEN") or os.getenv("TUSHARE_PRO_TOKEN")
 
     if not token:
@@ -128,7 +142,6 @@ def _tushare_client(token: Optional[str]):
 
     ts.set_token(token)
     return ts.pro_api()
-
 
 
 def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:
@@ -148,6 +161,7 @@ def _latest_trading_day_by_benchmark(pro, bench_symbol: str) -> str:
     return f"{last[:4]}-{last[4:6]}-{last[6:8]}"
 
 
+# ----------------- 从 TuShare 抓取日线 -----------------
 def _fetch_daily_with_basic_tushare(
     pro,
     ts_code: str,
@@ -155,20 +169,41 @@ def _fetch_daily_with_basic_tushare(
     end_date: Optional[str],
 ) -> pd.DataFrame:
     """
-    从 tushare 抓取日线 + daily_basic(turnover_rate)，合并为一张表：
-    - Date, Open, High, Low, Close, Volume
-    - TurnoverRate: 换手率（小数，0.01 = 1%）
+    从 TuShare 抓取日线 + daily_basic(turnover_rate)，合并为一张表：
+    输出字段：
+    - Date:         交易日期
+    - Open,High,Low,Close
+    - Volume:       成交量（手），来自 daily.vol
+    - Amount:       成交额（元）：
+                        - 优先用 daily.amount(千元) * 1000
+                        - 若该行缺失/为0，则用 Volume * Close * 100 估算
+    - TurnoverRate: 换手率（小数，0.01 = 1%），可能为 NaN
     """
+
     params = {"ts_code": ts_code}
     if start_date:
         params["start_date"] = start_date
     if end_date:
         params["end_date"] = end_date
 
-    # 日线
+    # 日线（包含 vol, amount）
     df_daily = pro.daily(**params)
     if df_daily is None or df_daily.empty:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume", "TurnoverRate"])
+        return pd.DataFrame(
+            columns=[
+                "Date",
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "Volume",
+                "Amount",
+                "TurnoverRate",
+            ]
+        )
+
+    # 只取需要的列，容错转数值
+    df_daily = df_daily.sort_values("trade_date").reset_index(drop=True)
 
     # daily_basic: 只拿 turnover_rate，减少积分
     df_basic = pro.daily_basic(
@@ -186,56 +221,94 @@ def _fetch_daily_with_basic_tushare(
         on=["ts_code", "trade_date"],
         how="left",
         suffixes=("", "_basic"),
-    )
+    ).sort_values("trade_date").reset_index(drop=True)
 
-    df = df.sort_values("trade_date").reset_index(drop=True)
+    # --- 数值列标准化 ---
+    open_ = pd.to_numeric(df["open"], errors="coerce")
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    close = pd.to_numeric(df["close"], errors="coerce")
+    vol_hand = pd.to_numeric(df["vol"], errors="coerce")        # 手
+    amt_thousand = pd.to_numeric(df["amount"], errors="coerce")  # 千元
 
-    # 构造输出
-    out = pd.DataFrame(
-        {
-            "Date": pd.to_datetime(df["trade_date"]),
-            "Open": df["open"].astype(float),
-            "High": df["high"].astype(float),
-            "Low": df["low"].astype(float),
-            "Close": df["close"].astype(float),
-            "Volume": df["vol"].astype(float),  # 单位：手
-        }
+    # --- 先按“千元 -> 元”换算 ---
+    amount_yuan = amt_thousand * 1000.0
+
+    # --- 对缺失或明显异常的行，用 Volume * Close * 100 做近似 ---
+    # 条件：
+    #   1) 原始 amount 为 NaN 或 0
+    #   2) vol 和 close 都有值
+    est_yuan = vol_hand * close * 100.0
+    fallback_mask = (
+        (amt_thousand.isna() | (amt_thousand == 0))
+        & est_yuan.notna()
+        & (est_yuan > 0)
     )
+    if fallback_mask.any():
+        # 可选：提示一下有 fallback，方便排查数据质量（不会很吵）
+        missing_cnt = int(fallback_mask.sum())
+        total_cnt = len(df)
+        print(
+            f"[info] {ts_code}: {missing_cnt}/{total_cnt} rows amount missing, "
+            f"filled by Volume*Close*100"
+        )
+        amount_yuan[fallback_mask] = est_yuan[fallback_mask]
 
     # TurnoverRate：转为小数（0.xx），缺失保持 NaN
     if "turnover_rate" in df.columns:
         tr = pd.to_numeric(df["turnover_rate"], errors="coerce") / 100.0
     else:
-        tr = pd.Series([float("nan")] * len(out))
-    out["TurnoverRate"] = tr
+        tr = pd.Series([float("nan")] * len(df))
+
+    out = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(df["trade_date"]),
+            "Open": open_,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": vol_hand,       # 手
+            "Amount": amount_yuan,    # 元（含估算）
+            "TurnoverRate": tr,       # 小数
+        }
+    )
 
     return out
 
-
 def _merge_incremental(existing: Optional[pd.DataFrame], new_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    合并历史与增量数据：
+    - 按 Date 去重
+    - 确保关键列存在：Amount, TurnoverRate
+    """
     if existing is None or existing.empty:
-        return new_df
+        existing = None
     if new_df is None or new_df.empty:
-        return existing
+        return existing if existing is not None else pd.DataFrame()
 
-    # 兼容老 CSV 没有 TurnoverRate 的情况：补列为 NaN 再 concat
-    for col in ["TurnoverRate"]:
-        if col not in existing.columns:
+    # 补齐列
+    for col in ["Amount", "TurnoverRate"]:
+        if existing is not None and col not in existing.columns:
             existing[col] = float("nan")
         if col not in new_df.columns:
             new_df[col] = float("nan")
 
-    merged = pd.concat([existing, new_df], ignore_index=True)
+    if existing is None:
+        merged = new_df
+    else:
+        merged = pd.concat([existing, new_df], ignore_index=True)
+
     merged = merged.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
     return merged
 
 
+# ----------------- 单只 symbol 更新 -----------------
 def update_one_tushare(
     pro,
     ts_code: str,
     out_dir: Path,
-    latest_open_day: str,  # YYYY-MM-DD（用基准股票推断）
-    last_date_hint: Optional[str] = None,  # 来自 manifest 的提示，减少一次读盘
+    latest_open_day: str,          # YYYY-MM-DD（用基准股票推断）
+    last_date_hint: Optional[str] = None,  # 来自 manifest 的提示，减少读盘
 ) -> None:
     """
     增量逻辑：
@@ -247,7 +320,9 @@ def update_one_tushare(
 
     existing: Optional[pd.DataFrame] = None
     last_dt = None
+
     if csv_path.exists() and last_date_hint:
+        # 优先信任 manifest
         try:
             last_dt = datetime.fromisoformat(last_date_hint).date()
         except Exception:
@@ -287,14 +362,13 @@ def update_one_tushare(
 
     save_csv(merged, csv_path)
     last = merged["Date"].iloc[-1].date()
-    print(
-        f"[ok] {ts_code}: {len(existing) if existing is not None else 0} -> {len(merged)} rows (last={last})"
-    )
+    base_len = len(existing) if existing is not None else 0
+    print(f"[ok] {ts_code}: {base_len} -> {len(merged)} rows (last={last})")
 
 
-# ----------------- 任务选择 -----------------
+# ----------------- symbol 列表与落后筛选 -----------------
 def iter_symbols_from_public_data(out_dir: Path) -> List[str]:
-    syms = []
+    syms: List[str] = []
     for p in sorted(out_dir.glob("*.csv")):
         name = p.name
         if name.lower() == "symbols.csv":
@@ -314,7 +388,7 @@ def select_stale_symbols(
     """
     m = load_manifest(manifest_path)
     if not m:
-        return symbols  # 没有 manifest 时退化为全量，后续会在 update_one 内部自跳过
+        return symbols  # 没有 manifest 时退化为全量
     latest_i = _ymd_to_int(latest_open_day)
     stale: List[str] = []
     for sym in symbols:
@@ -328,7 +402,7 @@ def select_stale_symbols(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", choices=["tushare"], default="tushare")
-    parser.add_argument("--token", help="Tushare token（可不填，默认读环境变量 TUSHARE_TOKEN）")
+    parser.add_argument("--token", help="TuShare token（可不填，默认读环境变量）")
     parser.add_argument(
         "--all",
         action="store_true",
@@ -341,7 +415,9 @@ def main():
 
     # manifest / 只更新落后 / 窗口限制 / 基准股票
     parser.add_argument(
-        "--build-manifest", action="store_true", help="仅从现有 CSV 构建 manifest 索引后退出"
+        "--build-manifest",
+        action="store_true",
+        help="仅从现有 CSV 构建 manifest 索引后退出",
     )
     parser.add_argument(
         "--only-stale",
@@ -354,10 +430,15 @@ def main():
         help="manifest 文件路径，默认 public/data_index.json",
     )
     parser.add_argument(
-        "--since-days", type=int, default=None, help="最多回补最近 N 天（可选；用于限制抓取窗口）"
+        "--since-days",
+        type=int,
+        default=None,
+        help="最多回补最近 N 天（可选；用于限制抓取窗口）",
     )
     parser.add_argument(
-        "--bench-symbol", default="000001.SZ", help="用此基准股票推断最近开市日（默认 000001.SZ）"
+        "--bench-symbol",
+        default="000001.SZ",
+        help="用此基准股票推断最近开市日（默认 000001.SZ）",
     )
 
     args = parser.parse_args()
@@ -382,8 +463,8 @@ def main():
         print(f"[manifest] 写入 {manifest_path}，共 {len(m)} 条。")
         return
 
-    # 用基准股票推断最近开市日（兼容只有日线权限的账号）
-    latest_open_day = _latest_trading_day_by_benchmark(pro, args.bench_symbol)  # YYYY-MM-DD
+    # 用基准股票推断最近开市日
+    latest_open_day = _latest_trading_day_by_benchmark(pro, args.bench_symbol)
 
     # ---- 选择待更新 symbol ----
     if args.symbol:
@@ -401,31 +482,38 @@ def main():
         print("用法示例：")
         print("  # 扫描一次现有 CSV，建立索引")
         print(
-            "  python -m backend.core.update_data --provider tushare --build-manifest --manifest public/data_index.json"
+            "  python -m backend.core.update_data "
+            "--provider tushare --build-manifest --manifest public/data_index.json"
         )
         print("  # 之后每天只更新确实落后的（不逐个读 CSV）")
         print(
-            "  python -m backend.core.update_data --provider tushare --all --only-stale --manifest public/data_index.json"
+            "  python -m backend.core.update_data "
+            "--provider tushare --all --only-stale --manifest public/data_index.json"
         )
-        print("  # 只用日线推断最新开市日，指定基准股票")
+        print("  # 指定基准股票推断最新开市日")
         print(
-            "  python -m backend.core.update_data --provider tushare --all --only-stale --bench-symbol 000001.SZ"
+            "  python -m backend.core.update_data "
+            "--provider tushare --all --only-stale --bench-symbol 000001.SZ"
         )
         print("  # 单只更新")
-        print("  python -m backend.core.update_data --provider tushare --symbol 600519.SH")
+        print(
+            "  python -m backend.core.update_data "
+            "--provider tushare --symbol 600519.SH"
+        )
         return
 
     if not todo:
         print("[done] 所有 symbol 均已最新，无需更新。")
         return
 
-    # 预计算 end_yyyymmdd
     end_yyyymmdd = _date_str_yyyymmdd(latest_open_day)
 
-    # 限制窗口（只影响 start 的下限，真正截取在 update_one 里靠 end 控制）
+    # 窗口限制（只影响开始日期下限）
     cutoff_i: Optional[int] = None
     if args.since_days:
-        cutoff_dt = datetime.fromisoformat(latest_open_day).date() - timedelta(days=args.since_days)
+        cutoff_dt = datetime.fromisoformat(latest_open_day).date() - timedelta(
+            days=args.since_days
+        )
         cutoff_i = int(cutoff_dt.strftime("%Y%m%d"))
 
     manifest_cache = load_manifest(manifest_path)
@@ -434,7 +522,7 @@ def main():
         try:
             hint = manifest_cache.get(ts_code)
 
-            # 如果限制窗口且存在 hint，提前检查是否无需更新
+            # 若指定窗口且已有 hint，可提前判断是否无需更新
             if hint and cutoff_i is not None:
                 try:
                     last_dt = datetime.fromisoformat(hint).date()
@@ -456,8 +544,6 @@ def main():
 
             # 成功后把 manifest 更新到 latest_open_day
             update_manifest_entry(manifest_path, ts_code, latest_open_day)
-
-            time.sleep(1.3)  # 降速，省积分
         except Exception as e:
             print(f"[error] {ts_code}: {e}")
 
