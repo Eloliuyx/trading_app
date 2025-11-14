@@ -11,6 +11,7 @@ import {
  * - 显示当前选中标的的基础信息
  * - 显示多因子（F1-F6）通过情况
  * - 提供本地笔记功能（仅存储在本机 localStorage）
+ * - 支持本地标记「弱股」（配合 F7 隐藏）
  */
 
 const fontFamily =
@@ -37,6 +38,21 @@ const subtitle: React.CSSProperties = {
   fontSize: 13,
   color: "#6b7280",
   marginTop: -4,
+};
+
+const viewDaysText: React.CSSProperties = {
+  fontSize: 12,
+  color: "#6b7280",
+  marginTop: 2,
+};
+
+const weakRow: React.CSSProperties = {
+  fontSize: 12,
+  color: "#4b5563",
+  marginTop: 4,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
 };
 
 const secTitle: React.CSSProperties = {
@@ -112,6 +128,9 @@ const SymbolDetail: React.FC = () => {
     getNotes,
     addNote,
     deleteNote,
+    getViewDaysCount,
+    weakSymbols,
+    toggleWeak,
   } = useDataStore((s) => ({
     stocks: s.stocks,
     selectedSymbol: s.selectedSymbol,
@@ -119,6 +138,9 @@ const SymbolDetail: React.FC = () => {
     getNotes: s.getNotes,
     addNote: s.addNote,
     deleteNote: s.deleteNote,
+    getViewDaysCount: s.getViewDaysCount,
+    weakSymbols: s.weakSymbols,
+    toggleWeak: s.toggleWeak,
   }));
 
   const item = useMemo(
@@ -132,7 +154,7 @@ const SymbolDetail: React.FC = () => {
     return (
       <div style={container}>
         <div style={{ fontSize: 14, color: "#9ca3af" }}>
-          左侧选择一只股票，查看多因子结果与个人备注。
+          左侧选择一只股票，查看多因子结果、弱股标记与个人备注。
         </div>
       </div>
     );
@@ -142,11 +164,17 @@ const SymbolDetail: React.FC = () => {
     item.last_date || market?.last_bar_date || market?.asof || "";
 
   const notes = getNotes(item.symbol);
+  const viewDays = getViewDaysCount(item.symbol);
+  const isWeak = weakSymbols.includes(item.symbol);
 
   const handleAddNote = () => {
     if (!noteText.trim()) return;
     addNote(item.symbol, noteText);
     setNoteText("");
+  };
+
+  const handleToggleWeak = (e: React.ChangeEvent<HTMLInputElement>) => {
+    toggleWeak(item.symbol, e.target.checked);
   };
 
   return (
@@ -160,6 +188,26 @@ const SymbolDetail: React.FC = () => {
         {item.market || ""}
         {item.is_st && "｜ST"}
         {asof && ` ｜ 数据截至：${asof}`}
+      </div>
+      {viewDays > 0 && (
+        <div style={viewDaysText}>
+          历史查看天数：{viewDays} 天
+        </div>
+      )}
+
+      {/* 弱股标记（本地） */}
+      <div style={weakRow}>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={isWeak}
+            onChange={handleToggleWeak}
+          />
+          <span>标记为弱股</span>
+        </label>
+        <span style={{ fontSize: 11, color: "#9ca3af" }}>
+          可配合 F7 隐藏
+        </span>
       </div>
 
       {/* 多因子规则通过情况 */}

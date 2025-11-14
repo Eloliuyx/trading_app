@@ -3,18 +3,8 @@
 ├── backend
 │   ├── core
 │   │   ├── __init__.py
-│   │   ├── cli.py
 │   │   ├── export_universe.py
-│   │   ├── io.py
-│   │   ├── reco.py
-│   │   ├── reco_cli.py
-│   │   ├── reco_io.py
 │   │   └── update_data.py
-│   ├── docs
-│   │   ├── ALGO_SPEC_trend_v0.3.md
-│   │   └── API_CONTRACT.md
-│   ├── legacy
-│   │   └── chan
 │   ├── pytest.ini
 │   ├── server.py
 │   └── trading_app_core.egg-info

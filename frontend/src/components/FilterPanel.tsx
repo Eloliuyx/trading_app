@@ -122,6 +122,30 @@ const FilterPanel: React.FC = () => {
             <span>{f.label}</span>
           </label>
         ))}
+
+        {/* F7：隐藏弱股（本地标记） */}
+        <label
+          style={checkboxLabel}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#f3f4f6";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!!filter.F7}
+            onChange={() => toggleFlag("F7")}
+            style={{
+              width: 14,
+              height: 14,
+              accentColor: "#2563eb",
+              cursor: "pointer",
+            }}
+          />
+          <span>F7: 隐藏弱股</span>
+        </label>
       </div>
     </div>
   );

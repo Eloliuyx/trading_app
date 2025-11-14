@@ -153,10 +153,10 @@ function matchSearch(stock: StockItem, q: string): boolean {
   );
 }
 
-/** 多因子过滤：仅对勾选的因子应用 test */
+/** 多因子过滤：仅对勾选的因子应用 test（F1-F6） */
 function matchFactors(stock: StockItem, filter: FilterState): boolean {
   for (const cfg of FACTOR_CONFIG) {
-    const key: FactorKey = cfg.key;
+    const key = cfg.key as FactorKey;
     if (!filter[key]) continue;
     if (!cfg.test(stock)) return false;
   }
@@ -164,14 +164,21 @@ function matchFactors(stock: StockItem, filter: FilterState): boolean {
 }
 
 const ResultList: React.FC = () => {
-  const { stocks, filter, selectedSymbol, setSelectedSymbol, market } =
-    useDataStore((s) => ({
-      stocks: s.stocks,
-      filter: s.filter,
-      selectedSymbol: s.selectedSymbol,
-      setSelectedSymbol: s.setSelectedSymbol,
-      market: s.market,
-    }));
+  const {
+    stocks,
+    filter,
+    selectedSymbol,
+    setSelectedSymbol,
+    market,
+    weakSymbols,
+  } = useDataStore((s) => ({
+    stocks: s.stocks,
+    filter: s.filter,
+    selectedSymbol: s.selectedSymbol,
+    setSelectedSymbol: s.setSelectedSymbol,
+    market: s.market,
+    weakSymbols: s.weakSymbols,
+  }));
 
   const [readMap, setReadMap] = useState<Record<string, string>>(
     () => loadReadMap()
@@ -199,10 +206,18 @@ const ResultList: React.FC = () => {
   // 当前可见标的列表
   const visible = useMemo(() => {
     if (!stocks?.length) return [];
-    return stocks
+    let list = stocks
       .filter((s) => matchSearch(s, filter.q))
       .filter((s) => matchFactors(s, filter));
-  }, [stocks, filter]);
+
+    // F7: 隐藏弱股（仅本机）
+    if (filter.F7 && weakSymbols.length) {
+      const weakSet = new Set(weakSymbols);
+      list = list.filter((s) => !weakSet.has(s.symbol));
+    }
+
+    return list;
+  }, [stocks, filter, weakSymbols]);
 
   // 点击选中 & 标记已读
   const handleSelect = (item: StockItem) => {
@@ -307,7 +322,6 @@ const ResultList: React.FC = () => {
                 {item.is_st && "｜ST"}
               </div>
               <div style={infoRowStyle}>
-                {/* 预留：如果以后后端加 score/bucket，可以自然显示 */}
                 {typeof item.score === "number" && (
                   <span style={scoreStyle}>
                     Score {Math.round(item.score)}
@@ -329,7 +343,7 @@ const ResultList: React.FC = () => {
               color: "#9ca3af",
             }}
           >
-            当前条件下暂无标的。建议放宽筛选条件，逐步叠加 F1-F6 检查。
+            当前条件下暂无标的。建议放宽筛选条件，逐步叠加 F1-F6 检查，必要时关闭 F7 以显示所有弱股。
           </div>
         )}
       </div>

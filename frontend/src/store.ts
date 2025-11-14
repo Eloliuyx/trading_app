@@ -46,14 +46,15 @@ export type StockItem = {
  * FilterPanel / ResultList / SymbolDetail 共用
  */
 
-export type FactorKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6";
+// F7 不属于 FACTOR_CONFIG（不依赖后端因子），但作为 FilterState 的一部分
+export type FactorKey = "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7";
 
 export type FilterState = {
   q: string; // 搜索关键字（代码 / 名称）
 } & Partial<Record<FactorKey, boolean>>;
 
 type FactorCfg = {
-  key: FactorKey;
+  key: Exclude<FactorKey, "F7">; // F7 不在这个表里
   label: string;
   test: (s: StockItem) => boolean;
 };
@@ -121,6 +122,10 @@ export type KLineBar = {
 
 const LS_KEY_NOTES = "ta_symbol_notes_v1";
 const LS_KEY_PLINES = "ta_price_lines_v1";
+/** 每个 symbol 被查看过的交易日集合：{ [symbol]: string[] } */
+const LS_KEY_VIEW_DAYS = "ta_view_days_v1";
+/** 弱股名单：string[] */
+const LS_KEY_WEAK = "ta_weak_symbols_v1";
 
 function safeParseJSON<T>(raw: string | null): T | null {
   if (!raw) return null;
@@ -134,9 +139,11 @@ function safeParseJSON<T>(raw: string | null): T | null {
 /** notes: { [symbol]: Note[] } */
 function loadNotes(): Record<string, Note[]> {
   if (typeof window === "undefined") return {};
-  return safeParseJSON<Record<string, Note[]>>(
-    window.localStorage.getItem(LS_KEY_NOTES)
-  ) || {};
+  return (
+    safeParseJSON<Record<string, Note[]>>(
+      window.localStorage.getItem(LS_KEY_NOTES)
+    ) || {}
+  );
 }
 
 function saveNotes(data: Record<string, Note[]>) {
@@ -150,14 +157,62 @@ function saveNotes(data: Record<string, Note[]>) {
 /** priceLines: { [symbol]: PriceLine[] } */
 function loadPriceLines(): Record<string, PriceLine[]> {
   if (typeof window === "undefined") return {};
-  return safeParseJSON<Record<string, PriceLine[]>>(
-    window.localStorage.getItem(LS_KEY_PLINES)
-  ) || {};
+  return (
+    safeParseJSON<Record<string, PriceLine[]>>(
+      window.localStorage.getItem(LS_KEY_PLINES)
+    ) || {}
+  );
 }
 
 function savePriceLines(data: Record<string, PriceLine[]>) {
   try {
     window.localStorage.setItem(LS_KEY_PLINES, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
+/** viewDays: { [symbol]: string[] } */
+function loadViewDays(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  const parsed =
+    safeParseJSON<Record<string, string[]>>(
+      window.localStorage.getItem(LS_KEY_VIEW_DAYS)
+    ) || {};
+  const cleaned: Record<string, string[]> = {};
+  for (const [sym, days] of Object.entries(parsed)) {
+    if (Array.isArray(days)) {
+      cleaned[sym] = days.filter(
+        (d) => typeof d === "string" && d.trim().length > 0
+      );
+    }
+  }
+  return cleaned;
+}
+
+function saveViewDays(data: Record<string, string[]>) {
+  try {
+    window.localStorage.setItem(LS_KEY_VIEW_DAYS, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
+/** 弱股名单：string[] */
+function loadWeakSymbols(): string[] {
+  if (typeof window === "undefined") return [];
+  const arr = safeParseJSON<unknown>(
+    window.localStorage.getItem(LS_KEY_WEAK)
+  );
+  if (!Array.isArray(arr)) return [];
+  return (arr as unknown[])
+    .filter((s) => typeof s === "string" && (s as string).trim().length > 0)
+    .map((s) => s as string);
+}
+
+function saveWeakSymbols(list: string[]) {
+  try {
+    window.localStorage.setItem(LS_KEY_WEAK, JSON.stringify(list));
   } catch {
     // ignore
   }
@@ -186,6 +241,12 @@ type AppState = {
   /** 水平线：symbol -> PriceLine[] */
   priceLines: Record<string, PriceLine[]>;
 
+  /** 标的查看历史：symbol -> 交易日字符串数组（去重） */
+  viewDaysMap: Record<string, string[]>;
+
+  /** 弱股名单：symbol[]（仅本机） */
+  weakSymbols: string[];
+
   /** —— 动作 —— */
 
   // 筛选
@@ -193,7 +254,7 @@ type AppState = {
   resetFilter: () => void;
   toggleFlag: (key: FactorKey) => void;
 
-  // 选中标的
+  // 选中标的（同时更新本地查看历史）
   setSelectedSymbol: (symbol: string | null) => void;
 
   // 数据加载
@@ -209,15 +270,28 @@ type AppState = {
   getLines: (symbol: string) => PriceLine[];
   addLine: (symbol: string, price: number) => void;
   clearLines: (symbol: string) => void;
+
+  // 查看历史
+  getViewDaysCount: (symbol: string) => number;
+
+  // 弱股标记
+  toggleWeak: (symbol: string, isWeak: boolean) => void;
 };
 
 export const useDataStore = create<AppState>((set, get) => ({
   stocks: [],
   market: null,
 
+  // 默认：F1/F2/F3/F5/F6 开；F4/F7 关
   filter: {
     q: "",
-    F1: true, // 默认只开 F1：先排除 ST
+    F1: true,
+    F2: true,
+    F3: true,
+    F5: true,
+    F6: true,
+    F4: false,
+    F7: false,
   },
 
   selectedSymbol: null,
@@ -225,6 +299,8 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   notesMap: loadNotes(),
   priceLines: loadPriceLines(),
+  viewDaysMap: loadViewDays(),
+  weakSymbols: loadWeakSymbols(),
 
   /** —— 筛选 —— */
 
@@ -238,7 +314,16 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   resetFilter: () =>
     set({
-      filter: { q: "", F1: true },
+      filter: {
+        q: "",
+        F1: true,
+        F2: true,
+        F3: true,
+        F5: true,
+        F6: true,
+        F4: false,
+        F7: false,
+      },
     }),
 
   toggleFlag: (key: FactorKey) =>
@@ -254,7 +339,32 @@ export const useDataStore = create<AppState>((set, get) => ({
 
   /** —— 当前选中 —— */
 
-  setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
+  setSelectedSymbol: (symbol) =>
+    set((state) => {
+      let nextViewDaysMap = state.viewDaysMap;
+
+      if (symbol) {
+        const dayKey =
+          state.market?.last_bar_date || state.market?.asof || "";
+        if (dayKey) {
+          const prev = state.viewDaysMap[symbol] || [];
+          if (!prev.includes(dayKey)) {
+            const updated = [...prev, dayKey];
+            nextViewDaysMap = {
+              ...state.viewDaysMap,
+              [symbol]: updated,
+            };
+            saveViewDays(nextViewDaysMap);
+          }
+        }
+      }
+
+      return {
+        ...state,
+        selectedSymbol: symbol,
+        viewDaysMap: nextViewDaysMap,
+      };
+    }),
 
   /** —— 加载 universe / market —— */
 
@@ -286,19 +396,14 @@ export const useDataStore = create<AppState>((set, get) => ({
     let stocks: StockItem[] = [];
     const market: MarketSnapshot = { status: "OK" };
 
-    // 结构 1: 直接是数组
     if (Array.isArray(data)) {
       stocks = data as StockItem[];
-    }
-    // 结构 2: { asof, last_bar_date, rules_version, list: [...] }
-    else if (Array.isArray(data.list)) {
+    } else if (Array.isArray(data.list)) {
       stocks = data.list as StockItem[];
       if (data.asof) market.asof = data.asof;
       if (data.last_bar_date) market.last_bar_date = data.last_bar_date;
       if (data.rules_version) market.rules_version = data.rules_version;
-    }
-    // 兜底：尝试从 data.stocks / data.items 等读取
-    else {
+    } else {
       if (Array.isArray(data.stocks)) {
         stocks = data.stocks as StockItem[];
       }
@@ -465,6 +570,42 @@ export const useDataStore = create<AppState>((set, get) => ({
 
       savePriceLines(nextAll);
       return { ...state, priceLines: nextAll };
+    });
+  },
+
+  /** —— 查看历史 —— */
+
+  getViewDaysCount: (symbol: string) => {
+    if (!symbol) return 0;
+    const { viewDaysMap } = get();
+    const arr = viewDaysMap[symbol];
+    if (!Array.isArray(arr) || !arr.length) return 0;
+    const uniq = new Set(
+      arr.filter((d) => typeof d === "string" && d.trim().length > 0)
+    );
+    return uniq.size;
+  },
+
+  /** —— 弱股标记 —— */
+
+  toggleWeak: (symbol: string, isWeak: boolean) => {
+    if (!symbol) return;
+
+    set((state) => {
+      const exists = state.weakSymbols.includes(symbol);
+      let next = state.weakSymbols;
+
+      if (isWeak && !exists) {
+        next = [...state.weakSymbols, symbol];
+      } else if (!isWeak && exists) {
+        next = state.weakSymbols.filter((s) => s !== symbol);
+      }
+
+      if (next !== state.weakSymbols) {
+        saveWeakSymbols(next);
+        return { ...state, weakSymbols: next };
+      }
+      return state;
     });
   },
 }));

@@ -58,39 +58,23 @@ const KLineChart: React.FC = () => {
   const addLine = useDataStore((s) => s.addLine);
   const clearLines = useDataStore((s) => s.clearLines);
 
-  // 从点击事件估算价格
+  // 从点击事件的 y 坐标反算价格（不再依赖 seriesData.close，完全按坐标取价）
   const getPriceFromClick = (
     param: MouseEventParams<Time>
   ): number | null => {
-    const chart = chartRef.current;
     const series = seriesRef.current;
-    const anyParam = param as any;
-    if (!chart || !series) return null;
-    const point = anyParam?.point;
+    if (!series) return null;
+
+    const point = param.point;
     if (!point) return null;
 
-    // 优先从 seriesData 读取收盘价
-    if (anyParam.seriesData) {
-      const d =
-        anyParam.seriesData.get?.(series as any) ??
-        anyParam.seriesData[series as any];
-      if (d && typeof d.close === "number") return d.close;
-    }
+    // 官方文档推荐写法：series.coordinateToPrice(point.y)
+    const price = series.coordinateToPrice(point.y);
+    if (price == null) return null;
 
-    // 回退：用坐标换算价格
-    const psFromSeries: any = (series as any).priceScale?.();
-    if (psFromSeries?.coordinateToPrice) {
-      const p = psFromSeries.coordinateToPrice(point.y);
-      if (p != null && Number.isFinite(p)) return p;
-    }
-
-    const psFromChart: any = (chart as any).priceScale?.("right");
-    if (psFromChart?.coordinateToPrice) {
-      const p = psFromChart.coordinateToPrice(point.y);
-      if (p != null && Number.isFinite(p)) return p;
-    }
-
-    return null;
+    const num = Number(price);
+    if (!Number.isFinite(num)) return null;
+    return num;
   };
 
   // 初始化图表（只执行一次）
@@ -108,7 +92,7 @@ const KLineChart: React.FC = () => {
         vertLines: { color: "#f3f4f6" },
         horzLines: { color: "#f3f4f6" },
       },
-      crosshair: { mode: 1 },
+      crosshair: { mode: 0 },
     });
 
     const series = chart.addCandlestickSeries({
@@ -146,8 +130,11 @@ const KLineChart: React.FC = () => {
     const handleClick = (param: MouseEventParams<Time>) => {
       const symbol = selectedSymbolRef.current;
       if (!symbol) return;
+
       const price = getPriceFromClick(param);
-      if (price == null || !Number.isFinite(price)) return;
+      if (price == null) return;
+
+      // store.addLine 里已经会做两位小数 & 去重
       addLine(symbol, Number(price.toFixed(2)));
     };
 
